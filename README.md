@@ -51,6 +51,11 @@ sh install-somedl.sh /data/somedl      # download folder; Lidarr must be able to
 
 Running it again updates SomeDL. Logs: `journalctl -u somedl -f`. In Lidarr use host `127.0.0.1`, port `5000`.
 
+**Match Lidarr's naming.** The mover and `--library` keep SomeDL's folder layout. Lidarr finds the files
+on *Rescan* as long as the artist folder matches. To get Lidarr's default naming straight away, set SomeDL's
+output template to `{album_artist}/{album} ({year})/{album_artist} - {album} - {track_pos} - {song}`. Turn on
+*Rename Tracks* in Lidarr for the cases where the year or special characters still differ.
+
 **Downloads from SomeDL's own WebUI into the library.** Give the library folder (Lidarr's root folder) as a
 second argument: `sh install-somedl.sh /data/somedl /data/music`. A timer (`somedl-mover.timer`, every 5
 minutes, `tools/somedl_mover.py`) then moves every album folder that has been untouched for 30 minutes into
@@ -116,7 +121,7 @@ to handle what only exists on YouTube, Deezer, Spotify and so on:
    already downloaded, so nothing is downloaded twice and Lidarr imports them within seconds (tested).
 
    Or use `--library /data/music` (run it on the machine where SomeDL saves its files). The script then waits
-   until SomeDL is done and moves the album into your library as `Artist/Album/`, the same layout Lidarr uses.
+   until SomeDL is done and moves the album into your library, keeping SomeDL's folder layout.
    Your music player sees it right away, and once Lidarr knows the album, *Rescan* on the artist picks
    up the files where they are. Add `--link` to hardlink instead of move: the same file in both folders without
    using extra space. A symlink is not offered on purpose. It breaks as soon as Lidarr moves or renames the

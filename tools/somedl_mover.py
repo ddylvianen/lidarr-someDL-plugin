@@ -5,8 +5,8 @@ Moves albums downloaded through SomeDL's own WebUI into your music library.
 Lidarr's downloads (through the SomeDL plugin) land in the same folder, but Lidarr imports those
 itself; the plugin marks their folders with a '.lidarr-somedl' file and this script leaves them alone.
 Everything else is moved once nothing in its folder has changed for --min-age minutes, keeping
-SomeDL's Artist/Album layout, which is also the layout Lidarr uses: once Lidarr knows the album,
-"Rescan" on the artist picks the files up where they are.
+SomeDL's folder layout (its output template). Lidarr finds the files with "Rescan" on the artist once it
+knows the album, as long as the artist folder matches; "Rename Tracks" in Lidarr then applies its naming.
 
   somedl_mover.py /data/somedl /data/music            move
   somedl_mover.py /data/somedl /data/music --link     hardlink instead: the files stay in SomeDL's
