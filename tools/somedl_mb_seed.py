@@ -364,7 +364,8 @@ def main():
     ap.add_argument("--album", help="YouTube Music album browse id (MPREb_...) instead of searching")
     ap.add_argument("--from-json", help="a saved /yt-get-album-browse-id reply, for offline use")
     ap.add_argument("--artist-mbid", help="MusicBrainz id of the release artist, skips the lookup")
-    ap.add_argument("-o", "--out", help="output file (default: musicbrainz_seed_<album>.html)")
+    ap.add_argument("-o", "--out", help="keep the page as this file. Default: with --serve or --open a temporary file "
+                                        "that is cleaned up, otherwise musicbrainz_seed_<album>.html here")
     ap.add_argument("--open", action="store_true", help="open the page in your browser")
     ap.add_argument("--serve", nargs="?", const=8099, type=int, metavar="PORT",
                     help="serve the page on this machine (default port 8099) so you can open it from another device")
@@ -400,14 +401,24 @@ def main():
 
     fields = build_fields(album, mbids, browse_id)
     safe = "".join(c if c.isalnum() else "_" for c in album.get("title", "release"))[:60]
-    out = a.out or f"musicbrainz_seed_{safe}.html"
+    # With --serve/--open the page is only a means to an end; a temporary file keeps the folder clean
+    temporary = not a.out and (a.serve or a.open)
+    if temporary:
+        handle, out = tempfile.mkstemp(prefix=f"musicbrainz_seed_{safe}_", suffix=".html")
+        os.close(handle)
+    else:
+        out = a.out or f"musicbrainz_seed_{safe}.html"
     with open(out, "w", encoding="utf-8") as f:
         f.write(render(fields, f"{', '.join(artists)} - {album.get('title', '')}"))
-    print(f"Wrote {out}. Open it in a browser where you are logged in to MusicBrainz.")
+    if not temporary:
+        print(f"Wrote {out}. Open it in a browser where you are logged in to MusicBrainz.")
     if a.open:
+        # The browser reads the file after this returns, so it stays in the temp folder (cleared on reboot)
         webbrowser.open("file://" + os.path.abspath(out))
     if a.serve:
         serve(out, a.serve)
+        if temporary and not a.open:
+            os.remove(out)
     if (a.download or a.library) and album.get("video_id"):
         download_video(a.somedl, album, a.library)
     elif a.download or a.library:
