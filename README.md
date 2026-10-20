@@ -120,6 +120,10 @@ to handle what only exists on YouTube, Deezer, Spotify and so on:
    ```
    Instead of a search you can give a YouTube or YouTube Music link: an album (`music.youtube.com/browse/...`
    or `.../playlist?list=OLAK5uy_...`) or a song or video (`watch?v=...`, `youtu.be/...`), whose album is used.
+   A plain upload that is not on YouTube Music (no song matching title and artist for 80%) becomes a single of
+   its own: artist and title come from the video (you can correct them), year from the upload date, the
+   thumbnail as a square cover. With `--download`/`--library` it is downloaded with yt-dlp and tagged by the
+   script, because SomeDL would look it up on YouTube Music and could tag it as another song.
    On a machine without a browser (an LXC), add `--serve`: the script then prints a link like
    `http://<ip>:8099/` that you open on your PC or phone. Submitting stays a manual step on purpose:
    MusicBrainz has no API for adding releases, and automating its editor counts as a bot, which needs approval.

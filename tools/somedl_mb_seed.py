@@ -30,11 +30,14 @@ import html
 import http.server
 import re
 import socket
+import subprocess
+import tempfile
 import json
 import os
 import shutil
 import sys
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -92,7 +95,8 @@ def pick_album(base, query):
 
 
 def resolve_link(base, link):
-    """Album browse id (MPREb_...) for a YouTube or YouTube Music link, or None when it is not a link."""
+    """For a YouTube or YouTube Music link: the album browse id (MPREb_...), or for a plain YouTube upload
+    that is not on YouTube Music, the video described as a single (dict). None when it is not a link."""
     if not re.match(r"^https?://", link.strip()):
         return None
     url = urllib.parse.urlparse(link.strip())
@@ -119,18 +123,74 @@ def resolve_link(base, link):
     return album_for_video(base, video)
 
 
-def album_for_video(base, video_id):
-    """The YouTube Music album of a song. Music videos are not on an album, so they are matched to the
-    song with the same title and artist; when that is ambiguous, you pick."""
+NOISE = re.compile(r"\s*[\(\[][^\)\]]*\b(official|video|audio|lyrics?|visuali[sz]er|clip|hd|4k|hq)\b[^\)\]]*[\)\]]", re.I)
+
+
+def normalize(name):
+    name = re.sub(r"^the\s+", "", (name or "").strip(), flags=re.I)
+    return "".join(c for c in unicodedata.normalize("NFKD", name).lower() if c.isalnum())
+
+
+def similarity(a, b):
+    """0..1 by edit distance on normalized names, the same rule the Lidarr indexer uses."""
+    a, b = normalize(a), normalize(b)
+    if not a or not b:
+        return 0.0
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(cur[j - 1] + 1, prev[j] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return 1 - prev[-1] / max(len(a), len(b))
+
+
+def tool(name):
+    """A binary from PATH, or from SomeDL's venv (where install-somedl.sh puts yt-dlp)."""
+    return shutil.which(name) or (f"/opt/somedl/bin/{name}" if os.path.exists(f"/opt/somedl/bin/{name}") else None)
+
+
+def video_info(video_id):
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    ytdlp = tool("yt-dlp")
+    if ytdlp:
+        try:
+            out = subprocess.run([ytdlp, "-J", "--no-warnings", "--skip-download", url],
+                                 capture_output=True, text=True, timeout=120, check=True).stdout
+            return json.loads(out)
+        except (subprocess.SubprocessError, ValueError) as e:
+            print(f"  (yt-dlp could not read the video: {e}; falling back to basic info)")
     try:
-        with urllib.request.urlopen("https://www.youtube.com/oembed?format=json&url=" +
-                                    urllib.parse.quote(f"https://www.youtube.com/watch?v={video_id}"), timeout=30) as r:
+        with urllib.request.urlopen("https://www.youtube.com/oembed?format=json&url=" + urllib.parse.quote(url), timeout=30) as r:
             info = json.load(r)
+        return {"title": info.get("title"), "channel": info.get("author_name")}
     except OSError as e:
         sys.exit(f"Could not look up that video on YouTube ({e}).")
-    artist = re.sub(r"\s+-\s+Topic$", "", info.get("author_name", ""))
-    title = info.get("title", "")
-    print(f"Video: {artist} - {title}")
+
+
+def guess_artist_title(info):
+    """'Artist - Title (Official Video)' as most uploads are named; YouTube's own artist/track if it has them."""
+    if info.get("artist") and info.get("track"):
+        return info["artist"].split(",")[0].strip(), info["track"].strip()
+    title = NOISE.sub("", info.get("title") or "").strip()
+    channel = re.sub(r"\s*(-\s*Topic|VEVO)$", "", info.get("channel") or info.get("uploader") or "", flags=re.I).strip()
+    if " - " in title:
+        artist, title = title.split(" - ", 1)
+        return artist.strip(), title.strip()
+    return channel, title
+
+
+def ask(label, default):
+    answer = input(f"{label} [{default}]: ").strip()
+    return answer or default
+
+
+def album_for_video(base, video_id):
+    """The YouTube Music album of a song. A music video or plain upload is matched to a YouTube Music song
+    with the same title and artist (80% or more); without one, the video itself becomes a single."""
+    info = video_info(video_id)
+    artist, title = guess_artist_title(info)
+    print(f"Video: {info.get('title')}  ->  {artist} - {title}")
 
     songs = somedl(base, "/yt-search", {"search_query": f"{artist} {title}", "filter": "songs"})["result"]
     songs = [x for x in songs if (x.get("album") or {}).get("id")]
@@ -138,16 +198,36 @@ def album_for_video(base, video_id):
     if exact:
         return exact[0]["album"]["id"]
 
-    albums = []
+    matches = []
     for x in songs:
-        if x["album"]["id"] not in [a["album"]["id"] for a in albums]:
-            albums.append(x)
-    if not albums:
-        sys.exit("This video is not linked to an album on YouTube Music. Search by name instead.")
-    for i, x in enumerate(albums[:8]):
-        print(f"[{i}] {', '.join(a['name'] for a in x.get('artists', []))} - {x['title']}  (album: {x['album']['name']})")
-    n = input("Which album? [0]: ").strip() or "0"
-    return albums[int(n)]["album"]["id"]
+        if similarity(title, x.get("title")) >= 0.8 and \
+                any(similarity(artist, a.get("name")) >= 0.8 for a in x.get("artists", [])) and \
+                x["album"]["id"] not in [m["album"]["id"] for m in matches]:
+            matches.append(x)
+
+    if matches:
+        for i, x in enumerate(matches[:8]):
+            print(f"[{i}] {', '.join(a['name'] for a in x.get('artists', []))} - {x['title']}  (album: {x['album']['name']})")
+        print(f"[{len(matches[:8])}] none of these: use the video itself as a single")
+        n = int(input("Which one? [0]: ").strip() or "0")
+        if n < len(matches[:8]):
+            return matches[n]["album"]["id"]
+    else:
+        print("Not on YouTube Music; using the video itself as a single.")
+
+    print("Check the names (Enter keeps them); they go into the tags and the MusicBrainz form:")
+    artist = ask("  Artist", artist)
+    title = ask("  Title", title)
+    date = info.get("release_date") or info.get("upload_date") or ""
+    return {
+        "title": title,
+        "type": "Single",
+        "year": info.get("release_year") or (date[:4] if date[:4].isdigit() else None),
+        "artists": [{"name": artist}],
+        "tracks": [{"title": title, "trackNumber": 1, "duration_seconds": info.get("duration"), "artists": [{"name": artist}]}],
+        "video_id": video_id,
+        "source_url": f"https://www.youtube.com/watch?v={video_id}",
+    }
 
 
 def serve(path, port):
@@ -229,13 +309,13 @@ def credit(prefix, names, mbids=None):
 
 
 def build_fields(album, mbids, browse_id):
+    source = album.get("source_url") or f"https://music.youtube.com/browse/{browse_id}"
     artists = [a["name"] for a in album.get("artists") or [] if a.get("name")]
     fields = [
         ("name", album.get("title", "")),
         ("status", "official"),
         ("mediums.0.format", "Digital Media"),
-        ("edit_note", "Seeded from YouTube Music via SomeDL: "
-                      f"https://music.youtube.com/browse/{browse_id}\nPlease check against the source."),
+        ("edit_note", f"Seeded via SomeDL from {source}\nPlease check against the source."),
     ]
     release_type = RELEASE_TYPES.get((album.get("type") or "").lower())
     if release_type:
@@ -247,6 +327,8 @@ def build_fields(album, mbids, browse_id):
     # it recognises music.youtube.com links and suggests one.
     if album.get("audioPlaylistId"):
         fields.append(("urls.0.url", f"https://music.youtube.com/playlist?list={album['audioPlaylistId']}"))
+    elif album.get("source_url"):
+        fields.append(("urls.0.url", album["source_url"]))
 
     for i, t in enumerate(album.get("tracks") or []):
         fields.append((f"mediums.0.track.{i}.name", t.get("title", "")))
@@ -303,7 +385,10 @@ def main():
         browse_id = a.album or (a.query and (resolve_link(a.somedl, a.query) or pick_album(a.somedl, a.query)))
         if not browse_id:
             ap.error("give a search query or --album")
-        album = somedl(a.somedl, "/yt-get-album-browse-id", {"album_id": browse_id, "return_album_data": True})["album_data"]
+        if isinstance(browse_id, dict):
+            album, browse_id = browse_id, None
+        else:
+            album = somedl(a.somedl, "/yt-get-album-browse-id", {"album_id": browse_id, "return_album_data": True})["album_data"]
 
     artists = [x["name"] for x in album.get("artists") or [] if x.get("name")]
     print(f"{', '.join(artists)} - {album.get('title')} ({album.get('type')}, {album.get('year')}, {len(album.get('tracks') or [])} tracks)")
@@ -323,10 +408,58 @@ def main():
         webbrowser.open("file://" + os.path.abspath(out))
     if a.serve:
         serve(out, a.serve)
-    if a.download or a.library:
+    if (a.download or a.library) and album.get("video_id"):
+        download_video(a.somedl, album, a.library)
+    elif a.download or a.library:
         ids = download(a.somedl, album)
         if a.library and ids:
             to_library(a.somedl, ids, a.library, a.link)
+
+
+def safe_name(text):
+    return re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(text or "")).strip(" .") or "_"
+
+
+def download_video(base, album, library):
+    """A plain YouTube upload, which SomeDL cannot tag (it would look the song up on YouTube Music and may
+    pick another one). Downloaded with yt-dlp and tagged here, into the library or SomeDL's folder, named
+    with SomeDL's own output template so it sits with everything else."""
+    ytdlp, ffmpeg = tool("yt-dlp"), tool("ffmpeg")
+    if not ytdlp or not ffmpeg:
+        sys.exit("Downloading a plain YouTube video needs yt-dlp and ffmpeg on this machine (the SomeDL LXC has both).")
+
+    config = somedl(base, "/settings-read")["config"]["download"]
+    root = library or config["output_dir"]
+    if not os.path.isdir(root):
+        sys.exit(f"{root} is not on this machine. Run this where SomeDL saves its files, or give --library.")
+
+    artist, title = album["artists"][0]["name"], album["title"]
+    year = str(album.get("year") or "")
+    relative = config.get("output") or "{album_artist}/{album}/{track_pos} - {song}"
+    relative = relative.format(artist=safe_name(artist), album_artist=safe_name(artist), song=safe_name(title),
+                               album=safe_name(title), year=year, track_pos="01", track_count="1")
+    target = os.path.join(root, relative + ".mp3")
+    if os.path.exists(target):
+        sys.exit(f"Already there: {target}")
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+
+    with tempfile.TemporaryDirectory() as work:
+        print("Downloading with yt-dlp ...")
+        subprocess.run([ytdlp, "--no-warnings", "-q", "--no-playlist", "-f", "bestaudio/best",
+                        "-x", "--audio-format", "mp3", "--audio-quality", "0",
+                        "--embed-thumbnail", "--convert-thumbnails", "jpg",
+                        # square cover from the 16:9 thumbnail
+                        "--ppa", "ThumbnailsConvertor+ffmpeg_o:-c:v mjpeg -vf crop=\"'if(gt(ih,iw),iw,ih)':'if(gt(iw,ih),ih,iw)'\"",
+                        "-o", os.path.join(work, "audio.%(ext)s"), album["source_url"]], check=True)
+        tags = {"title": title, "artist": artist, "album_artist": artist, "album": title,
+                "track": "1/1", "date": year, "comment": album["source_url"]}
+        args = [ffmpeg, "-loglevel", "error", "-i", os.path.join(work, "audio.mp3"), "-map", "0", "-c", "copy",
+                "-id3v2_version", "3"]
+        for key, value in tags.items():
+            if value:
+                args += ["-metadata", f"{key}={value}"]
+        subprocess.run(args + [target], check=True)
+    print(f"Saved {target}")
 
 
 def download(base, album):
