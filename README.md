@@ -115,8 +115,10 @@ to handle what only exists on YouTube, Deezer, Spotify and so on:
    if MusicBrainz knows them), tracklist with lengths, and the YouTube Music link. It also warns if the
    release seems to exist already. You check it and submit:
    ```sh
-   SOMEDL_URL=http://<host>:5000 python3 tools/somedl_mb_seed.py "artist album" --open
+   somedl-seed "artist album"                                              # on the SomeDL machine (install-somedl.sh adds it)
+   SOMEDL_URL=http://<host>:5000 python3 tools/somedl_mb_seed.py "artist album" --open   # anywhere else
    ```
+   Without a browser on that machine (an LXC), copy the HTML file it writes to your PC and open it there.
    Lidarr's metadata server picks up new MusicBrainz data within about a day. Then *Refresh & Scan* the
    artist in Lidarr.
 

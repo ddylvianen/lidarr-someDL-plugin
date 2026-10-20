@@ -56,6 +56,15 @@ mkdir -p /var/lib/somedl "$OUTPUT"
 chown -R "$RUN_USER:$RUN_GROUP" /opt/somedl /var/lib/somedl "$OUTPUT"
 
 fetch deploy/somedl.service /etc/systemd/system/somedl.service
+
+# 'somedl-seed': MusicBrainz seeding (tools/somedl_mb_seed.py), pointed at this SomeDL by default
+fetch tools/somedl_mb_seed.py /opt/somedl/somedl_mb_seed.py
+cat > /usr/local/bin/somedl-seed <<'WRAPPER'
+#!/bin/sh
+export SOMEDL_URL="${SOMEDL_URL:-http://127.0.0.1:5000}"
+exec /usr/bin/python3 -I /opt/somedl/somedl_mb_seed.py "$@"
+WRAPPER
+chmod 755 /usr/local/bin/somedl-seed
 sed -i -e "s#@USER@#$RUN_USER#" -e "s#@GROUP@#$RUN_GROUP#" -e "s#@OUTPUT@#$OUTPUT#" /etc/systemd/system/somedl.service
 
 if [ -n "$LIBRARY" ]; then
@@ -93,3 +102,4 @@ curl -sf -X POST http://127.0.0.1:5000/settings-apply -H 'Content-Type: applicat
 echo "SomeDL $(curl -s http://127.0.0.1:5000/get-version | sed 's/.*"v":"\([^"]*\)".*/\1/') runs on port 5000."
 echo "In Lidarr use host 127.0.0.1 (same machine) or this machine's IP, port 5000."
 [ -z "$LIBRARY" ] || echo "WebUI downloads move to $LIBRARY after 30 idle minutes (log: journalctl -u somedl-mover)."
+echo "Add a YouTube Music album to MusicBrainz: somedl-seed \"artist album\" (somedl-seed --help)"
