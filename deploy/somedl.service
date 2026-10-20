@@ -1,0 +1,27 @@
+# SomeDL WebUI as a systemd service, next to a Lidarr that runs without Docker.
+# install-somedl.sh fills in @USER@ and @OUTPUT@ and installs this as /etc/systemd/system/somedl.service.
+
+[Unit]
+Description=SomeDL WebUI (YouTube Music downloads for Lidarr)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Same user as Lidarr, so Lidarr can move the downloaded files into the library
+User=@USER@
+Group=@GROUP@
+UMask=0002
+Environment=HOME=/var/lib/somedl
+Environment=XDG_CONFIG_HOME=/var/lib/somedl
+WorkingDirectory=/var/lib/somedl
+# YouTube regularly breaks older yt-dlp versions (HTTP 403), so update it on every start.
+# The leading '-' keeps SomeDL starting when there is no internet at that moment.
+ExecStartPre=-/opt/somedl/bin/pip install --quiet --disable-pip-version-check -U --pre "yt-dlp[default]"
+ExecStart=/opt/somedl/bin/somedl web --host 0.0.0.0 --port 5000 --no-browser --output @OUTPUT@
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

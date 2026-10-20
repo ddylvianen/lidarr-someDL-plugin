@@ -15,6 +15,7 @@ Usage:
   somedl_mb_seed.py --somedl http://somedl:5000 --album MPREb_xxxx  album browse id from a music.youtube.com/browse/... link
   somedl_mb_seed.py ... --open                                      also open the page in your browser
   somedl_mb_seed.py ... --download                                  also let SomeDL download the album now
+  somedl_mb_seed.py ... --library /data/music [--link]              download, wait, then move (or hardlink) it into your library
 
 Once MusicBrainz has it, Lidarr's metadata server picks it up within a day or so; then use
 "Refresh & Scan" on the artist in Lidarr (or add the artist if it is new).
@@ -25,6 +26,7 @@ import argparse
 import html
 import json
 import os
+import shutil
 import sys
 import time
 import urllib.error
@@ -37,10 +39,10 @@ USER_AGENT = "Lidarr.Plugin.SomeDL-mb-seed/0.1 ( https://github.com/ddylvianen/l
 RELEASE_TYPES = {"album": "album", "ep": "ep", "single": "single"}
 
 
-def somedl(base, path, payload):
+def somedl(base, path, payload=None):
     req = urllib.request.Request(
         base.rstrip("/") + path,
-        data=json.dumps(payload).encode(),
+        data=json.dumps(payload).encode() if payload is not None else None,
         headers={"Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=120) as r:
@@ -180,6 +182,11 @@ def main():
     ap.add_argument("--open", action="store_true", help="open the page in your browser")
     ap.add_argument("--download", action="store_true",
                     help="also queue the album in SomeDL now, so you can listen before Lidarr knows it")
+    ap.add_argument("--library", metavar="DIR",
+                    help="download (implies --download), wait until SomeDL is done, then move the album into DIR. "
+                         "Run this on the machine where SomeDL saves its files")
+    ap.add_argument("--link", action="store_true",
+                    help="with --library: hardlink instead of move, so the files stay in SomeDL's folder too")
     a = ap.parse_args()
 
     if a.from_json:
@@ -208,8 +215,10 @@ def main():
     print(f"Wrote {out}. Open it in a browser where you are logged in to MusicBrainz.")
     if a.open:
         webbrowser.open("file://" + os.path.abspath(out))
-    if a.download:
-        download(a.somedl, album)
+    if a.download or a.library:
+        ids = download(a.somedl, album)
+        if a.library and ids:
+            to_library(a.somedl, ids, a.library, a.link)
 
 
 def download(base, album):
@@ -222,6 +231,62 @@ def download(base, album):
         return
     songs = somedl(base, "/yt-download", {"url": f"https://music.youtube.com/playlist?list={playlist}"}).get("song_list", [])
     print(f"SomeDL queued {len(songs)} tracks; follow them in its WebUI ({base}).")
+    return [s["somedl_id"] for s in songs if s.get("somedl_id")]
+
+
+def wait_for(base, ids):
+    """somedl_id -> [state, path] once every track has finished."""
+    pending = set(ids)
+    finished = {}
+    while pending:
+        time.sleep(5)
+        status = somedl(base, "/status")
+        for i in list(pending):
+            if i in status.get("finished_items", {}):
+                finished[i] = status["finished_items"][i]
+                pending.discard(i)
+        print(f"\r  {len(finished)}/{len(ids)} tracks done", end="", flush=True)
+    print()
+    return finished
+
+
+def to_library(base, ids, library, link):
+    """
+    Moves the album from SomeDL's folder into the library, keeping SomeDL's Artist/Album layout. That
+    is the layout Lidarr uses too, so once Lidarr knows the album, "Rescan" on the artist adopts the
+    files where they are. A hardlink is the same file under a second name: no extra space, and it
+    keeps working whichever of the two is moved or deleted later (a symlink would break when Lidarr
+    moves or renames its target).
+    """
+    root = somedl(base, "/settings-read")["config"]["download"]["output_dir"]
+    if not os.path.isdir(root):
+        sys.exit(f"SomeDL saves to {root}, which is not on this machine. Run this script where SomeDL runs.")
+
+    done = 0
+    folders = set()
+    for state, path in wait_for(base, ids).values():
+        if state not in ("success", "already_downloaded") or not path or not os.path.isfile(path):
+            continue
+        target = os.path.join(library, os.path.relpath(path, root))
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        if os.path.exists(target):
+            print(f"  already in library: {target}")
+            continue
+        if link:
+            os.link(path, target)
+        else:
+            shutil.move(path, target)
+            folders.add(os.path.dirname(path))
+        done += 1
+
+    # Leave no empty album/artist folders behind in SomeDL's folder
+    for folder in sorted(folders, key=len, reverse=True):
+        while folder.startswith(root.rstrip("/") + "/") and os.path.isdir(folder) and not os.listdir(folder):
+            os.rmdir(folder)
+            folder = os.path.dirname(folder)
+
+    failed = len(ids) - done
+    print(f"{'Linked' if link else 'Moved'} {done} tracks into {library}" + (f"; {failed} failed or were already there" if failed else ""))
 
 
 if __name__ == "__main__":

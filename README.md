@@ -37,6 +37,20 @@ is 101000 on the host, so give that UID write access to the storage.
 mkdir -p /data/somedl /data/music && cd deploy && docker compose up -d
 ```
 
+### Without Docker (Lidarr already runs as a systemd service)
+
+`deploy/install-somedl.sh` installs SomeDL next to it: a Python venv in `/opt/somedl`, settings in
+`/var/lib/somedl`, and a `somedl` systemd service (`deploy/somedl.service`). The service runs as the same user
+as the `lidarr` service, updates yt-dlp on every start, and gets the per-album output template set for you,
+so setup step 1 below is already done. Run it as root on the machine (LXC) where Lidarr runs:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/ddylvianen/lidarr-someDL-plugin/main/deploy/install-somedl.sh
+sh install-somedl.sh /data/somedl      # download folder; Lidarr must be able to reach it under this path
+```
+
+Running it again updates SomeDL. Logs: `journalctl -u somedl -f`. In Lidarr use host `127.0.0.1`, port `5000`.
+
 ## Setup
 
 1. **SomeDL output template.** In the SomeDL WebUI (`http://<host>:5000`, settings) or in
@@ -81,6 +95,13 @@ to handle what only exists on YouTube, Deezer, Spotify and so on:
    Add `--download` to have SomeDL download the album right away as well, so you don't have to wait for
    Lidarr to listen to it. When Lidarr knows the album later and searches it, SomeDL reports the files as
    already downloaded, so nothing is downloaded twice and Lidarr imports them within seconds (tested).
+
+   Or use `--library /data/music` (run it on the machine where SomeDL saves its files). The script then waits
+   until SomeDL is done and moves the album into your library as `Artist/Album/`, the same layout Lidarr uses.
+   Your music player sees it right away, and once Lidarr knows the album, *Rescan* on the artist picks
+   up the files where they are. Add `--link` to hardlink instead of move: the same file in both folders without
+   using extra space. A symlink is not offered on purpose. It breaks as soon as Lidarr moves or renames the
+   file it points to, and a player in another container cannot follow it.
 3. **Last.fm.** Last.fm has no way to add artists or albums. They appear there once scrobbled, and they only
    help Lidarr through option 1 (Tubifarry's Last.fm source). Lidarr's built-in Last.fm support is an import
    list (which artists to add), not a metadata source.
