@@ -151,7 +151,11 @@ to handle what only exists on YouTube, Deezer, Spotify and so on:
 (WAV, AIFF, ALAC, APE, WavPack) to FLAC and recompresses FLAC at the highest level. Both are bit-for-bit
 lossless: a converted original is only deleted after the FLAC passed `flac -t`, and FLAC files `flac` refuses
 (an ID3 tag in front) are re-encoded through ffmpeg and only replaced when the decoded audio is identical.
-Lossy files (MP3, AAC, Opus) are left alone, since FLAC cannot restore what they lost. Files changed in the last
+Lossy files (MP3, AAC, Opus) are not converted, since FLAC cannot restore what they lost. Every audio file
+(FLAC, MP3, M4A, Opus, Ogg) does get its embedded covers optimized losslessly (optipng, jpegtran) and the empty
+padding in its tags removed; the result only replaces the original when its audio packets are byte-for-byte the
+same, its tags are the same and its covers decode to the same pixels. `--measure` reports what that would save
+without changing anything. Files changed in the last
 hour are skipped and finished files are remembered, so after the first run it only touches what is new. Put
 `LIDARR_URL` and `LIDARR_API_KEY` in `/etc/default/music-flac` to let Lidarr rescan folders where a file got the
 `.flac` name. Preview with `python3 /opt/music-flac/music_flac.py /data/music --dry-run --min-age 0`; see the space saved,

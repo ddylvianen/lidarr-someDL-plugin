@@ -17,7 +17,7 @@ fetch() {
 }
 
 apt-get update -qq
-apt-get install -y -qq python3 ffmpeg flac curl >/dev/null
+apt-get install -y -qq python3 python3-mutagen ffmpeg flac optipng libjpeg-turbo-progs curl >/dev/null
 
 mkdir -p /opt/music-flac /var/lib/music-flac
 fetch tools/music_flac.py /opt/music-flac/music_flac.py
@@ -36,4 +36,5 @@ systemctl enable --now music-flac.timer >/dev/null 2>&1
 
 echo "Nightly at 03:30: $LIBRARY to FLAC + recompress. Start now: systemctl start music-flac"
 echo "Preview first:  python3 /opt/music-flac/music_flac.py $LIBRARY --dry-run --min-age 0"
+echo "Cover/padding gain, changes nothing: python3 /opt/music-flac/music_flac.py $LIBRARY --measure --min-age 0"
 echo "Log:            journalctl -u music-flac"
