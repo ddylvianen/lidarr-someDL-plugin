@@ -13,6 +13,9 @@ it instead of creating a duplicate artist) and warns when a release with this na
 Usage:
   somedl_mb_seed.py --somedl http://somedl:5000 "artist album"     search, then pick a hit
   somedl_mb_seed.py --somedl http://somedl:5000 --album MPREb_xxxx  album browse id from a music.youtube.com/browse/... link
+  somedl_mb_seed.py ... "https://music.youtube.com/playlist?list=OLAK5uy_..."   or a YouTube (Music) link:
+                    album (browse/playlist) or a song/video (watch?v=, youtu.be/), whose album is used
+  somedl_mb_seed.py ... --serve                                     serve the page on this machine, open it from any device
   somedl_mb_seed.py ... --open                                      also open the page in your browser
   somedl_mb_seed.py ... --download                                  also let SomeDL download the album now
   somedl_mb_seed.py ... --library /data/music [--link]              download, wait, then move (or hardlink) it into your library
@@ -24,6 +27,9 @@ Standard library only. Seeding fields: https://wiki.musicbrainz.org/Development/
 """
 import argparse
 import html
+import http.server
+import re
+import socket
 import json
 import os
 import shutil
@@ -83,6 +89,104 @@ def pick_album(base, query):
         print(f"[{i}] {artists} - {h['title']} ({h.get('type')}, {h.get('year')})")
     n = input("Pick a number [0]: ").strip() or "0"
     return hits[int(n)]["browseId"]
+
+
+def resolve_link(base, link):
+    """Album browse id (MPREb_...) for a YouTube or YouTube Music link, or None when it is not a link."""
+    if not re.match(r"^https?://", link.strip()):
+        return None
+    url = urllib.parse.urlparse(link.strip())
+    params = urllib.parse.parse_qs(url.query)
+
+    browse = re.search(r"/browse/(MPRE[\w-]+)", url.path)
+    if browse:
+        return browse.group(1)
+
+    playlist = (params.get("list") or [""])[0]
+    if playlist.startswith("OLAK5uy_"):
+        # An album's audio playlist; its tracks name the album they belong to
+        tracks = somedl(base, "/yt-get-album", {"album_id": playlist})["result"].get("tracks") or []
+        album_id = next((t["album"]["id"] for t in tracks if (t.get("album") or {}).get("id")), None)
+        if album_id:
+            return album_id
+        sys.exit("That playlist has no album on YouTube Music.")
+    if playlist and "v" not in params:
+        sys.exit("That is a user playlist, not an album. Give an album link, or a song from the album.")
+
+    video = (params.get("v") or [""])[0] or (url.path.strip("/") if url.netloc.endswith("youtu.be") else "")
+    if not video:
+        sys.exit("Could not find an album, playlist or video in that link.")
+    return album_for_video(base, video)
+
+
+def album_for_video(base, video_id):
+    """The YouTube Music album of a song. Music videos are not on an album, so they are matched to the
+    song with the same title and artist; when that is ambiguous, you pick."""
+    try:
+        with urllib.request.urlopen("https://www.youtube.com/oembed?format=json&url=" +
+                                    urllib.parse.quote(f"https://www.youtube.com/watch?v={video_id}"), timeout=30) as r:
+            info = json.load(r)
+    except OSError as e:
+        sys.exit(f"Could not look up that video on YouTube ({e}).")
+    artist = re.sub(r"\s+-\s+Topic$", "", info.get("author_name", ""))
+    title = info.get("title", "")
+    print(f"Video: {artist} - {title}")
+
+    songs = somedl(base, "/yt-search", {"search_query": f"{artist} {title}", "filter": "songs"})["result"]
+    songs = [x for x in songs if (x.get("album") or {}).get("id")]
+    exact = [x for x in songs if x.get("videoId") == video_id]
+    if exact:
+        return exact[0]["album"]["id"]
+
+    albums = []
+    for x in songs:
+        if x["album"]["id"] not in [a["album"]["id"] for a in albums]:
+            albums.append(x)
+    if not albums:
+        sys.exit("This video is not linked to an album on YouTube Music. Search by name instead.")
+    for i, x in enumerate(albums[:8]):
+        print(f"[{i}] {', '.join(a['name'] for a in x.get('artists', []))} - {x['title']}  (album: {x['album']['name']})")
+    n = input("Which album? [0]: ").strip() or "0"
+    return albums[int(n)]["album"]["id"]
+
+
+def serve(path, port):
+    """Serves the page once on this machine, so a browser elsewhere (PC, phone) can open it."""
+    with open(path, "rb") as f:
+        body = f.read()
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        served = False
+
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(body)
+            Handler.served = True
+
+        def log_message(self, *args):
+            pass
+
+    try:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        probe.connect(("192.0.2.1", 9))  # no packet is sent; only picks the outgoing interface
+        ip = probe.getsockname()[0]
+        probe.close()
+    except OSError:
+        ip = socket.gethostname()
+
+    server = http.server.HTTPServer(("0.0.0.0", port), Handler)
+    print(f"Open http://{ip}:{port}/ in a browser where you are logged in to MusicBrainz (Ctrl+C to stop).", flush=True)
+    try:
+        while not Handler.served:
+            server.handle_request()
+        # The form posts straight to MusicBrainz, so one visit is all it needs; linger briefly for a reload
+        server.timeout = 30
+        server.handle_request()
+    except KeyboardInterrupt:
+        pass
+    server.server_close()
 
 
 def find_artist(name):
@@ -173,13 +277,15 @@ def render(fields, title):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("query", nargs="?", help="search text for YouTube Music, e.g. 'artist album'")
+    ap.add_argument("query", nargs="?", help="search text, e.g. 'artist album', or a YouTube / YouTube Music link")
     ap.add_argument("--somedl", default=os.environ.get("SOMEDL_URL", "http://localhost:5000"), help="SomeDL WebUI URL (or set SOMEDL_URL)")
     ap.add_argument("--album", help="YouTube Music album browse id (MPREb_...) instead of searching")
     ap.add_argument("--from-json", help="a saved /yt-get-album-browse-id reply, for offline use")
     ap.add_argument("--artist-mbid", help="MusicBrainz id of the release artist, skips the lookup")
     ap.add_argument("-o", "--out", help="output file (default: musicbrainz_seed_<album>.html)")
     ap.add_argument("--open", action="store_true", help="open the page in your browser")
+    ap.add_argument("--serve", nargs="?", const=8099, type=int, metavar="PORT",
+                    help="serve the page on this machine (default port 8099) so you can open it from another device")
     ap.add_argument("--download", action="store_true",
                     help="also queue the album in SomeDL now, so you can listen before Lidarr knows it")
     ap.add_argument("--library", metavar="DIR",
@@ -194,7 +300,7 @@ def main():
             data = json.load(f)
         album, browse_id = data.get("album_data", data), a.album or "unknown"
     else:
-        browse_id = a.album or (a.query and pick_album(a.somedl, a.query))
+        browse_id = a.album or (a.query and (resolve_link(a.somedl, a.query) or pick_album(a.somedl, a.query)))
         if not browse_id:
             ap.error("give a search query or --album")
         album = somedl(a.somedl, "/yt-get-album-browse-id", {"album_id": browse_id, "return_album_data": True})["album_data"]
@@ -215,6 +321,8 @@ def main():
     print(f"Wrote {out}. Open it in a browser where you are logged in to MusicBrainz.")
     if a.open:
         webbrowser.open("file://" + os.path.abspath(out))
+    if a.serve:
+        serve(out, a.serve)
     if a.download or a.library:
         ids = download(a.somedl, album)
         if a.library and ids:

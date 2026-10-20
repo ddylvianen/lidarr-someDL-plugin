@@ -118,7 +118,11 @@ to handle what only exists on YouTube, Deezer, Spotify and so on:
    somedl-seed "artist album"                                              # on the SomeDL machine (install-somedl.sh adds it)
    SOMEDL_URL=http://<host>:5000 python3 tools/somedl_mb_seed.py "artist album" --open   # anywhere else
    ```
-   Without a browser on that machine (an LXC), copy the HTML file it writes to your PC and open it there.
+   Instead of a search you can give a YouTube or YouTube Music link: an album (`music.youtube.com/browse/...`
+   or `.../playlist?list=OLAK5uy_...`) or a song or video (`watch?v=...`, `youtu.be/...`), whose album is used.
+   On a machine without a browser (an LXC), add `--serve`: the script then prints a link like
+   `http://<ip>:8099/` that you open on your PC or phone. Submitting stays a manual step on purpose:
+   MusicBrainz has no API for adding releases, and automating its editor counts as a bot, which needs approval.
    Lidarr's metadata server picks up new MusicBrainz data within about a day. Then *Refresh & Scan* the
    artist in Lidarr.
 
