@@ -9,4 +9,4 @@ Type=oneshot
 User=@USER@
 Group=@GROUP@
 UMask=0002
-ExecStart=/usr/bin/python3 -I /opt/somedl/somedl_mover.py @OUTPUT@ @LIBRARY@ @MODE@
+ExecStart=/usr/bin/python3 -u -I /opt/somedl/somedl_mover.py @OUTPUT@ @LIBRARY@ @MODE@
