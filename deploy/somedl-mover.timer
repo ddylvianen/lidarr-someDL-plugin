@@ -1,0 +1,9 @@
+[Unit]
+Description=Move SomeDL WebUI downloads into the music library every 5 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

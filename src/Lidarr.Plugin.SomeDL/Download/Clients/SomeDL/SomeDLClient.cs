@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentValidation.Results;
@@ -28,6 +29,11 @@ namespace NzbDrone.Core.Download.Clients.SomeDL
         // download is failed. Covers the moment between SomeDL taking a track off its queue and
         // listing it as active.
         private static readonly TimeSpan MissingGracePeriod = TimeSpan.FromMinutes(2);
+
+        // Left in every album folder this client downloads, so tools/somedl_mover.py (which moves what
+        // was downloaded through SomeDL's own WebUI into the library) leaves Lidarr's downloads alone.
+        // Lidarr deletes the folder, marker included, after importing.
+        public const string MarkerFileName = ".lidarr-somedl";
 
         private readonly ISomeDLProxy _proxy;
         private readonly ISomeDLDownloadStore _store;
@@ -112,6 +118,7 @@ namespace NzbDrone.Core.Download.Clients.SomeDL
                 {
                     download.Finished[id] = finished;
                     changed = true;
+                    MarkFolder(finished);
                 }
                 else if (status.ActiveItems.ContainsKey(id))
                 {
@@ -225,6 +232,29 @@ namespace NzbDrone.Core.Download.Clients.SomeDL
                 .FirstOrDefault();
         }
 
+        private void MarkFolder(List<string> finished)
+        {
+            if (finished.Count < 2 || string.IsNullOrWhiteSpace(finished[1]))
+            {
+                return;
+            }
+
+            var folder = _remotePathMappingService.RemapRemoteToLocal(Settings.Host, new OsPath(finished[1])).Directory;
+            var marker = (folder + MarkerFileName).FullPath;
+
+            try
+            {
+                if (_diskProvider.FolderExists(folder.FullPath) && !_diskProvider.FileExists(marker))
+                {
+                    _diskProvider.WriteAllText(marker, "Downloaded for Lidarr; tools/somedl_mover.py leaves this folder alone.\n");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Debug(ex, "Could not write {0}", marker);
+            }
+        }
+
         public override void RemoveItem(DownloadClientItem item, bool deleteData)
         {
             var download = _store.GetAll(Definition.Id).FirstOrDefault(d => d.DownloadId == item.DownloadId);
@@ -270,6 +300,11 @@ namespace NzbDrone.Core.Download.Clients.SomeDL
                 }
 
                 folders.Add(local.Directory.FullPath);
+            }
+
+            foreach (var marker in folders.Select(f => Path.Combine(f, MarkerFileName)).Where(_diskProvider.FileExists))
+            {
+                _diskProvider.DeleteFile(marker);
             }
 
             foreach (var folder in folders.Where(f => _diskProvider.FolderExists(f) && _diskProvider.FolderEmpty(f)))

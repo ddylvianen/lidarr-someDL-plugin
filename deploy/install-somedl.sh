@@ -1,6 +1,9 @@
 #!/bin/sh
 # Installs SomeDL as a systemd service on Debian/Ubuntu, e.g. in the Proxmox LXC that runs Lidarr.
-# Run as root:   sh install-somedl.sh [download folder]      (default: /data/somedl)
+# Run as root:   sh install-somedl.sh [download folder] [library folder]
+#   download folder: where SomeDL saves (default /data/somedl)
+#   library folder:  optional; also installs a timer that moves albums downloaded through SomeDL's
+#                    WebUI into this folder (SOMEDL_MOVER_LINK=1 to hardlink instead of move)
 # Lidarr in another LXC: SOMEDL_UID=<uid Lidarr runs as there> sh install-somedl.sh /data/somedl
 #
 # - SomeDL goes in a Python venv in /opt/somedl, its settings in /var/lib/somedl
@@ -10,7 +13,14 @@
 set -eu
 
 OUTPUT=${1:-/data/somedl}
-SERVICE_URL=https://raw.githubusercontent.com/ddylvianen/lidarr-someDL-plugin/main/deploy/somedl.service
+LIBRARY=${2:-}
+REPO_RAW=https://raw.githubusercontent.com/ddylvianen/lidarr-someDL-plugin/main
+HERE=$(dirname "$0")
+
+# Copies a file of this repo from next to this script, or downloads it when the script was fetched alone
+fetch() {
+    if [ -f "$HERE/../$1" ]; then cp "$HERE/../$1" "$2"; else curl -fsSL "$REPO_RAW/$1" -o "$2"; fi
+}
 
 [ "$(id -u)" = 0 ] || { echo "Run as root"; exit 1; }
 
@@ -45,16 +55,26 @@ mkdir -p /var/lib/somedl "$OUTPUT"
 # The service updates yt-dlp on start, so its user must be able to write the venv
 chown -R "$RUN_USER:$RUN_GROUP" /opt/somedl /var/lib/somedl "$OUTPUT"
 
-if [ -f "$(dirname "$0")/somedl.service" ]; then
-    cp "$(dirname "$0")/somedl.service" /etc/systemd/system/somedl.service
-else
-    curl -fsSL "$SERVICE_URL" -o /etc/systemd/system/somedl.service
-fi
+fetch deploy/somedl.service /etc/systemd/system/somedl.service
 sed -i -e "s#@USER@#$RUN_USER#" -e "s#@GROUP@#$RUN_GROUP#" -e "s#@OUTPUT@#$OUTPUT#" /etc/systemd/system/somedl.service
+
+if [ -n "$LIBRARY" ]; then
+    [ -d "$LIBRARY" ] || { echo "Library folder $LIBRARY does not exist"; exit 1; }
+    MODE=""
+    [ "${SOMEDL_MOVER_LINK:-0}" = 1 ] && MODE="--link"
+    fetch tools/somedl_mover.py /opt/somedl/somedl_mover.py
+    fetch deploy/somedl-mover.service /etc/systemd/system/somedl-mover.service
+    fetch deploy/somedl-mover.timer /etc/systemd/system/somedl-mover.timer
+    sed -i -e "s#@USER@#$RUN_USER#" -e "s#@GROUP@#$RUN_GROUP#" -e "s#@OUTPUT@#$OUTPUT#" \
+        -e "s#@LIBRARY@#$LIBRARY#" -e "s# @MODE@#${MODE:+ $MODE}#" /etc/systemd/system/somedl-mover.service
+fi
 
 systemctl daemon-reload
 systemctl enable somedl >/dev/null 2>&1
 systemctl restart somedl
+if [ -n "$LIBRARY" ]; then
+    systemctl enable --now somedl-mover.timer >/dev/null 2>&1
+fi
 
 printf "Waiting for SomeDL"
 i=0
@@ -72,3 +92,4 @@ curl -sf -X POST http://127.0.0.1:5000/settings-apply -H 'Content-Type: applicat
 
 echo "SomeDL $(curl -s http://127.0.0.1:5000/get-version | sed 's/.*"v":"\([^"]*\)".*/\1/') runs on port 5000."
 echo "In Lidarr use host 127.0.0.1 (same machine) or this machine's IP, port 5000."
+[ -z "$LIBRARY" ] || echo "WebUI downloads move to $LIBRARY after 30 idle minutes (log: journalctl -u somedl-mover)."

@@ -1,0 +1,12 @@
+# Moves albums downloaded through SomeDL's WebUI into the library (tools/somedl_mover.py).
+# install-somedl.sh fills in @USER@, @GROUP@, @OUTPUT@, @LIBRARY@ and @MODE@; started by somedl-mover.timer.
+
+[Unit]
+Description=Move SomeDL WebUI downloads into the music library
+
+[Service]
+Type=oneshot
+User=@USER@
+Group=@GROUP@
+UMask=0002
+ExecStart=/usr/bin/python3 -I /opt/somedl/somedl_mover.py @OUTPUT@ @LIBRARY@ @MODE@
