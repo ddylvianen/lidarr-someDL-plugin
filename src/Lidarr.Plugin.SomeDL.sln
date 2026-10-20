@@ -1,0 +1,43 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lidarr.Plugin.SomeDL", "Lidarr.Plugin.SomeDL\Lidarr.Plugin.SomeDL.csproj", "{55320257-65A5-4109-A0B5-1EF3CD5DFB20}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Lidarr", "Lidarr", "{70CD5630-1DC0-44AF-B573-BB1FC08CAA8A}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{F7D0C3A4-5D3D-47A1-BDB2-56FC99071758}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lidarr.Core", "Lidarr\src\NzbDrone.Core\Lidarr.Core.csproj", "{F6A05008-F0F1-4B50-B46B-65DA7CEE8BF8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lidarr.Common", "Lidarr\src\NzbDrone.Common\Lidarr.Common.csproj", "{A1D5C68E-F061-45A2-A157-DBBF458C0FF7}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{55320257-65A5-4109-A0B5-1EF3CD5DFB20}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{55320257-65A5-4109-A0B5-1EF3CD5DFB20}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{55320257-65A5-4109-A0B5-1EF3CD5DFB20}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{55320257-65A5-4109-A0B5-1EF3CD5DFB20}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F6A05008-F0F1-4B50-B46B-65DA7CEE8BF8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F6A05008-F0F1-4B50-B46B-65DA7CEE8BF8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F6A05008-F0F1-4B50-B46B-65DA7CEE8BF8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F6A05008-F0F1-4B50-B46B-65DA7CEE8BF8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1D5C68E-F061-45A2-A157-DBBF458C0FF7}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1D5C68E-F061-45A2-A157-DBBF458C0FF7}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1D5C68E-F061-45A2-A157-DBBF458C0FF7}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1D5C68E-F061-45A2-A157-DBBF458C0FF7}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{F7D0C3A4-5D3D-47A1-BDB2-56FC99071758} = {70CD5630-1DC0-44AF-B573-BB1FC08CAA8A}
+		{F6A05008-F0F1-4B50-B46B-65DA7CEE8BF8} = {F7D0C3A4-5D3D-47A1-BDB2-56FC99071758}
+		{A1D5C68E-F061-45A2-A157-DBBF458C0FF7} = {F7D0C3A4-5D3D-47A1-BDB2-56FC99071758}
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,47 @@
+# Lidarr (nightly, needed for plugins) + SomeDL, for a Docker host such as a Proxmox LXC or VM.
+#
+# One /data mount shared by both containers, so the paths SomeDL reports are the paths Lidarr sees
+# (no Remote Path Mapping needed) and Lidarr can move finished files instead of copying them:
+#   /data/somedl   SomeDL downloads here
+#   /data/music    Lidarr's root folder
+#
+# Start:  docker compose up -d
+# Then follow "Setup" in the README (SomeDL output template, plugin, indexer, client, delay profile).
+
+services:
+  lidarr:
+    image: lscr.io/linuxserver/lidarr:nightly
+    container_name: lidarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Amsterdam
+    volumes:
+      - ./lidarr:/config
+      - /data:/data
+    ports:
+      - 8686:8686
+    restart: unless-stopped
+
+  somedl:
+    image: ghcr.io/fant4zma/somedl:latest
+    container_name: somedl
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Amsterdam
+    # YouTube regularly breaks older yt-dlp versions (HTTP 403 on downloads), so update it on every
+    # start instead of waiting for a new image. Then hand over to the image's normal entrypoint.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - pip install --quiet --root-user-action=ignore -U --pre "yt-dlp[default]" || true;
+        exec /entrypoint.sh somedl web --host 0.0.0.0 --port 5000 --no-browser --output /data/somedl
+    volumes:
+      - ./somedl:/config
+      - /data:/data
+    # SomeDL's WebUI has no login. Only publish this port on a trusted network; Lidarr reaches it
+    # as http://somedl:5000 over the compose network either way.
+    ports:
+      - 5000:5000
+    restart: unless-stopped

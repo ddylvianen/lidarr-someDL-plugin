@@ -1,0 +1,65 @@
+name: Build Plugin
+on:
+  push:
+    branches: [main]
+    tags-ignore: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  PLUGIN_NAME: Lidarr.Plugin.SomeDL
+  PLUGIN_VERSION: 0.1.0.0
+  # Lidarr refuses plugins built against a newer Lidarr.Core than itself, and reads this line from
+  # the release notes to decide whether to offer an update
+  MINIMUM_LIDARR_VERSION: 3.1.5.5066
+  DOTNET_VERSION: 8.0.421
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: Stamp versions
+        run: |
+          sed -i -e "s/<AssemblyVersion>[0-9.*]\+<\/AssemblyVersion>/<AssemblyVersion>$PLUGIN_VERSION<\/AssemblyVersion>/" src/Directory.Build.props
+          sed -i -e "s/<AssemblyVersion>[0-9.*]\+<\/AssemblyVersion>/<AssemblyVersion>$MINIMUM_LIDARR_VERSION<\/AssemblyVersion>/" src/Lidarr/src/Directory.Build.props
+      - name: Build
+        run: dotnet publish src/Lidarr.Plugin.SomeDL.sln -c Release -f net8.0 -p:NuGetAudit=false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: net8.0
+          path: ./${{ env.PLUGIN_NAME }}.net8.0.zip
+
+  release:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: net8.0
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ env.PLUGIN_VERSION }}
+        run: |
+          if gh release view "$TAG" -R "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "::warning::$TAG already exists; bump PLUGIN_VERSION to release this push"
+            exit 0
+          fi
+          printf 'SomeDL (YouTube Music) indexer and download client for Lidarr. Requires Lidarr nightly.\n\nMinimum Lidarr Version: %s\n' "$MINIMUM_LIDARR_VERSION" > notes.md
+          # --target must be a branch name: Lidarr only offers updates from releases on main/master
+          gh release create "$TAG" -R "${{ github.repository }}" --target main --title "SomeDL Plugin $PLUGIN_VERSION" \
+            --notes-file notes.md --prerelease "$PLUGIN_NAME.net8.0.zip"

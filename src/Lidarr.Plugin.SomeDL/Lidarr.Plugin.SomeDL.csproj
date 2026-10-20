@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Lidarr\src\NzbDrone.Core\Lidarr.Core.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </ProjectReference>
+
+    <ProjectReference Include="..\Lidarr\src\NzbDrone.Common\Lidarr.Common.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </ProjectReference>
+  </ItemGroup>
+
+  <!-- Only the plugin goes in the zip: everything else it references (sqlite natives included) ships with Lidarr -->
+  <Target Name="ZipOutputPath" AfterTargets="Publish">
+    <ItemGroup>
+      <PluginFiles Include="$(PublishDir)Lidarr.Plugin.SomeDL.*" />
+    </ItemGroup>
+    <RemoveDir Directories="$(PublishDir)zip" />
+    <Copy SourceFiles="@(PluginFiles)" DestinationFolder="$(PublishDir)zip" />
+    <ZipDirectory SourceDirectory="$(PublishDir)zip" DestinationFile="$(SolutionDir)\..\Lidarr.Plugin.SomeDL.$(TargetFramework).zip" Overwrite="true" />
+  </Target>
+
+</Project>

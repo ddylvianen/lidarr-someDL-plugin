@@ -1,0 +1,7 @@
+_temp/
+_plugins/
+_output/
+*.zip
+build.log
+__pycache__/
+musicbrainz_seed_*.html

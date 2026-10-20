@@ -1,0 +1,228 @@
+#!/usr/bin/env python3
+"""
+Add a YouTube Music album that MusicBrainz (and therefore Lidarr) does not know yet.
+
+Looks the album up through SomeDL, then writes an HTML page that opens MusicBrainz' "Add release"
+editor with everything filled in: title, type, date, artist, tracklist with lengths and the YouTube
+Music link. You check it and press "Enter edit" there; nothing is submitted for you. You need a
+(free) MusicBrainz account.
+
+Before seeding it asks MusicBrainz whether the artist already exists (so the release is linked to
+it instead of creating a duplicate artist) and warns when a release with this name seems to be there.
+
+Usage:
+  somedl_mb_seed.py --somedl http://somedl:5000 "artist album"     search, then pick a hit
+  somedl_mb_seed.py --somedl http://somedl:5000 --album MPREb_xxxx  album browse id from a music.youtube.com/browse/... link
+  somedl_mb_seed.py ... --open                                      also open the page in your browser
+  somedl_mb_seed.py ... --download                                  also let SomeDL download the album now
+
+Once MusicBrainz has it, Lidarr's metadata server picks it up within a day or so; then use
+"Refresh & Scan" on the artist in Lidarr (or add the artist if it is new).
+
+Standard library only. Seeding fields: https://wiki.musicbrainz.org/Development/Release_Editor_Seeding
+"""
+import argparse
+import html
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import webbrowser
+
+MB = "https://musicbrainz.org"
+USER_AGENT = "Lidarr.Plugin.SomeDL-mb-seed/0.1 ( https://github.com/ddylvianen/lidarr-someDL-plugin )"
+RELEASE_TYPES = {"album": "album", "ep": "ep", "single": "single"}
+
+
+def somedl(base, path, payload):
+    req = urllib.request.Request(
+        base.rstrip("/") + path,
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=120) as r:
+        return json.load(r)
+
+
+def musicbrainz(path, **query):
+    # MusicBrainz allows one request per second and answers 503 above that
+    query["fmt"] = "json"
+    req = urllib.request.Request(f"{MB}/ws/2/{path}?{urllib.parse.urlencode(query)}", headers={"User-Agent": USER_AGENT})
+    for attempt in range(3):
+        time.sleep(1.1 * (attempt + 1))
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code != 503:
+                error = e
+                break
+            error = e
+        except OSError as e:
+            error = e
+            break
+    print(f"  (MusicBrainz lookup failed: {error}; continuing without it)")
+    return None
+
+
+def lucene(text):
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def pick_album(base, query):
+    hits = [h for h in somedl(base, "/yt-search", {"search_query": query, "filter": "albums"})["result"] if h.get("browseId")]
+    if not hits:
+        sys.exit("No album found on YouTube Music for: " + query)
+    for i, h in enumerate(hits[:10]):
+        artists = ", ".join(a["name"] for a in h.get("artists", []))
+        print(f"[{i}] {artists} - {h['title']} ({h.get('type')}, {h.get('year')})")
+    n = input("Pick a number [0]: ").strip() or "0"
+    return hits[int(n)]["browseId"]
+
+
+def find_artist(name):
+    """MBID of the artist when MusicBrainz has exactly one exact-name match, else None."""
+    data = musicbrainz("artist/", query=f"artist:{lucene(name)}", limit=10)
+    if not data:
+        return None
+    exact = [a for a in data.get("artists", []) if a["name"].casefold() == name.casefold()]
+    if len(exact) == 1:
+        a = exact[0]
+        print(f"  Artist on MusicBrainz: {a['name']} ({a.get('disambiguation') or a.get('country') or 'no details'}) {MB}/artist/{a['id']}")
+        return a["id"]
+    if exact:
+        print(f"  {len(exact)} artists named '{name}' on MusicBrainz; pick the right one in the editor:")
+        for a in exact:
+            print(f"    {MB}/artist/{a['id']}  {a.get('disambiguation') or a.get('country') or ''}")
+    else:
+        print(f"  '{name}' is not on MusicBrainz yet; the editor will let you add the artist too.")
+    return None
+
+
+def warn_if_exists(artist, title):
+    data = musicbrainz("release/", query=f"release:{lucene(title)} AND artist:{lucene(artist)}", limit=5)
+    found = [r for r in (data or {}).get("releases", []) if r.get("score", 0) >= 90]
+    for r in found:
+        print(f"  WARNING: MusicBrainz may already have this: {r['title']} ({r.get('date', '?')}) {MB}/release/{r['id']}")
+    return bool(found)
+
+
+def credit(prefix, names, mbids=None):
+    fields = []
+    for i, name in enumerate(names):
+        fields.append((f"{prefix}.names.{i}.name", name))
+        fields.append((f"{prefix}.names.{i}.artist.name", name))
+        if mbids and mbids.get(name):
+            fields.append((f"{prefix}.names.{i}.mbid", mbids[name]))
+        if i < len(names) - 1:
+            fields.append((f"{prefix}.names.{i}.join_phrase", " & " if i == len(names) - 2 else ", "))
+    return fields
+
+
+def build_fields(album, mbids, browse_id):
+    artists = [a["name"] for a in album.get("artists") or [] if a.get("name")]
+    fields = [
+        ("name", album.get("title", "")),
+        ("status", "official"),
+        ("mediums.0.format", "Digital Media"),
+        ("edit_note", "Seeded from YouTube Music via SomeDL: "
+                      f"https://music.youtube.com/browse/{browse_id}\nPlease check against the source."),
+    ]
+    release_type = RELEASE_TYPES.get((album.get("type") or "").lower())
+    if release_type:
+        fields.append(("type", release_type))
+    if str(album.get("year") or "").isdigit():
+        fields.append(("events.0.date.year", str(album["year"])))
+    fields += credit("artist_credit", artists, mbids)
+    # The relationship type is left for the editor to pick ("stream for free" / "streaming page");
+    # it recognises music.youtube.com links and suggests one.
+    if album.get("audioPlaylistId"):
+        fields.append(("urls.0.url", f"https://music.youtube.com/playlist?list={album['audioPlaylistId']}"))
+
+    for i, t in enumerate(album.get("tracks") or []):
+        fields.append((f"mediums.0.track.{i}.name", t.get("title", "")))
+        fields.append((f"mediums.0.track.{i}.number", str(t.get("trackNumber") or i + 1)))
+        if t.get("duration_seconds"):
+            fields.append((f"mediums.0.track.{i}.length", str(int(t["duration_seconds"]) * 1000)))
+        names = [a["name"] for a in t.get("artists") or [] if a.get("name")]
+        if names and names != artists:
+            fields += credit(f"mediums.0.track.{i}.artist_credit", names, mbids)
+    return fields
+
+
+def render(fields, title):
+    inputs = "\n".join(f'<input type="hidden" name="{html.escape(k)}" value="{html.escape(v)}">' for k, v in fields)
+    rows = "".join(f"<tr><td>{html.escape(k)}</td><td>{html.escape(v)}</td></tr>" for k, v in fields)
+    return f"""<!doctype html><html lang="en"><meta charset="utf-8"><title>MusicBrainz seed: {html.escape(title)}</title>
+<body style="font-family:system-ui,sans-serif;max-width:48rem;margin:2rem auto;padding:0 1rem">
+<h1>{html.escape(title)}</h1>
+<p>Opens the MusicBrainz release editor pre-filled. Check everything there, then press <b>Enter edit</b>.</p>
+<form method="post" action="{MB}/release/add" target="_blank" accept-charset="UTF-8">
+{inputs}
+<button style="font-size:1.1rem;padding:.6rem 1.2rem">Open in MusicBrainz</button>
+</form>
+<details style="margin-top:2rem"><summary>Fields being sent</summary>
+<table style="font-size:.85rem;border-collapse:collapse">{rows}</table></details>
+</body></html>"""
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("query", nargs="?", help="search text for YouTube Music, e.g. 'artist album'")
+    ap.add_argument("--somedl", default=os.environ.get("SOMEDL_URL", "http://localhost:5000"), help="SomeDL WebUI URL (or set SOMEDL_URL)")
+    ap.add_argument("--album", help="YouTube Music album browse id (MPREb_...) instead of searching")
+    ap.add_argument("--from-json", help="a saved /yt-get-album-browse-id reply, for offline use")
+    ap.add_argument("--artist-mbid", help="MusicBrainz id of the release artist, skips the lookup")
+    ap.add_argument("-o", "--out", help="output file (default: musicbrainz_seed_<album>.html)")
+    ap.add_argument("--open", action="store_true", help="open the page in your browser")
+    ap.add_argument("--download", action="store_true",
+                    help="also queue the album in SomeDL now, so you can listen before Lidarr knows it")
+    a = ap.parse_args()
+
+    if a.from_json:
+        with open(a.from_json, encoding="utf-8") as f:
+            data = json.load(f)
+        album, browse_id = data.get("album_data", data), a.album or "unknown"
+    else:
+        browse_id = a.album or (a.query and pick_album(a.somedl, a.query))
+        if not browse_id:
+            ap.error("give a search query or --album")
+        album = somedl(a.somedl, "/yt-get-album-browse-id", {"album_id": browse_id, "return_album_data": True})["album_data"]
+
+    artists = [x["name"] for x in album.get("artists") or [] if x.get("name")]
+    print(f"{', '.join(artists)} - {album.get('title')} ({album.get('type')}, {album.get('year')}, {len(album.get('tracks') or [])} tracks)")
+
+    mbids = {}
+    if artists:
+        mbids[artists[0]] = a.artist_mbid or find_artist(artists[0])
+        warn_if_exists(artists[0], album.get("title", ""))
+
+    fields = build_fields(album, mbids, browse_id)
+    safe = "".join(c if c.isalnum() else "_" for c in album.get("title", "release"))[:60]
+    out = a.out or f"musicbrainz_seed_{safe}.html"
+    with open(out, "w", encoding="utf-8") as f:
+        f.write(render(fields, f"{', '.join(artists)} - {album.get('title', '')}"))
+    print(f"Wrote {out}. Open it in a browser where you are logged in to MusicBrainz.")
+    if a.open:
+        webbrowser.open("file://" + os.path.abspath(out))
+    if a.download:
+        download(a.somedl, album)
+
+
+def download(base, album):
+    # Same call as SomeDL's own album button, so the tracks are tagged with this album and land in
+    # its album folder. Once Lidarr knows the album, its search through the SomeDL plugin finds the
+    # files already there (SomeDL reports them as already downloaded) and imports them.
+    playlist = album.get("audioPlaylistId")
+    if not playlist:
+        print("No playlist id for this album; download it from the SomeDL WebUI instead.")
+        return
+    songs = somedl(base, "/yt-download", {"url": f"https://music.youtube.com/playlist?list={playlist}"}).get("song_list", [])
+    print(f"SomeDL queued {len(songs)} tracks; follow them in its WebUI ({base}).")
+
+
+if __name__ == "__main__":
+    main()
