@@ -1,0 +1,15 @@
+# Converts lossless files to FLAC and recompresses FLAC at the highest level (tools/music_flac.py).
+# install-music-flac.sh fills in @LIBRARY@; started by music-flac.timer.
+
+[Unit]
+Description=Keep the music library in (maximally compressed) FLAC
+
+[Service]
+Type=oneshot
+# Optional: LIDARR_URL=http://<ip>:8686 and LIDARR_API_KEY=... so Lidarr rescans renamed files right away
+EnvironmentFile=-/etc/default/music-flac
+ExecStart=/usr/bin/python3 -I /opt/music-flac/music_flac.py @LIBRARY@
+# A first run over a large library takes hours; keep it out of everyone's way
+Nice=19
+IOSchedulingClass=idle
+TimeoutStartSec=infinity

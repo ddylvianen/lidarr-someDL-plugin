@@ -144,6 +144,18 @@ to handle what only exists on YouTube, Deezer, Spotify and so on:
    help Lidarr through option 1 (Tubifarry's Last.fm source). Lidarr's built-in Last.fm support is an import
    list (which artists to add), not a metadata source.
 
+## Keeping the library in FLAC (optional)
+
+`deploy/install-music-flac.sh /data/music` installs a nightly job (`music-flac.timer`, 03:30,
+`tools/music_flac.py`) for the machine that holds the music. It converts lossless files in other formats
+(WAV, AIFF, ALAC, APE, WavPack) to FLAC and recompresses FLAC at the highest level. Both are bit-for-bit
+lossless: a converted original is only deleted after the FLAC passed `flac -t`, and FLAC files `flac` refuses
+(an ID3 tag in front) are re-encoded through ffmpeg and only replaced when the decoded audio is identical.
+Lossy files (MP3, AAC, Opus) are left alone, since FLAC cannot restore what they lost. Files changed in the last
+hour are skipped and finished files are remembered, so after the first run it only touches what is new. Put
+`LIDARR_URL` and `LIDARR_API_KEY` in `/etc/default/music-flac` to let Lidarr rescan folders where a file got the
+`.flac` name. Preview with `python3 /opt/music-flac/music_flac.py /data/music --dry-run --min-age 0`.
+
 ## Limits
 
 - YouTube audio is lossy, roughly 128-160 kbps Opus/AAC. The release quality is what Lidarr will see after
