@@ -154,7 +154,8 @@ lossless: a converted original is only deleted after the FLAC passed `flac -t`, 
 Lossy files (MP3, AAC, Opus) are left alone, since FLAC cannot restore what they lost. Files changed in the last
 hour are skipped and finished files are remembered, so after the first run it only touches what is new. Put
 `LIDARR_URL` and `LIDARR_API_KEY` in `/etc/default/music-flac` to let Lidarr rescan folders where a file got the
-`.flac` name. Preview with `python3 /opt/music-flac/music_flac.py /data/music --dry-run --min-age 0`.
+`.flac` name. Preview with `python3 /opt/music-flac/music_flac.py /data/music --dry-run --min-age 0`; see the space saved,
+in total and per run, with `python3 /opt/music-flac/music_flac.py /data/music --stats`.
 
 ## Limits
 
