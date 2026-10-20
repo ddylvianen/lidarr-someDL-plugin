@@ -11,6 +11,8 @@ namespace NzbDrone.Plugin.SomeDL
         SomeDLVersion GetVersion(string baseUrl);
         SomeDLDownloadConfig GetDownloadConfig(string baseUrl);
         SomeDLSearchResponse SearchAlbums(string baseUrl, string query);
+        SomeDLSongSearchResponse SearchSongs(string baseUrl, string query);
+        SomeDLAlbumPage GetAlbumPage(string baseUrl, string browseId);
         SomeDLPlaylist GetPlaylist(string baseUrl, string playlistId);
         List<string> DownloadAlbum(string baseUrl, string url);
         SomeDLStatus GetStatus(string baseUrl);
@@ -46,6 +48,16 @@ namespace NzbDrone.Plugin.SomeDL
         public SomeDLSearchResponse SearchAlbums(string baseUrl, string query)
         {
             return Post<SomeDLSearchResponse>(baseUrl, "yt-search", new { search_query = query, filter = "albums" });
+        }
+
+        public SomeDLSongSearchResponse SearchSongs(string baseUrl, string query)
+        {
+            return Post<SomeDLSongSearchResponse>(baseUrl, "yt-search", new { search_query = query, filter = "songs" });
+        }
+
+        public SomeDLAlbumPage GetAlbumPage(string baseUrl, string browseId)
+        {
+            return Post<SomeDLAlbumPageResponse>(baseUrl, "yt-get-album-browse-id", new { album_id = browseId, return_album_data = true })?.AlbumData;
         }
 
         public SomeDLPlaylist GetPlaylist(string baseUrl, string playlistId)

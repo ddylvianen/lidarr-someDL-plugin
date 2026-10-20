@@ -92,8 +92,12 @@ and newer) and Lidarr imports them itself. Log: `journalctl -u somedl-mover`.
    mp3 shows up as **MP3-VBR-V0**, opus/best as OGG Vorbis Q5, m4a as AAC-192. Allow that quality in the
    profile you use for these artists.
 
-Indexer options: *Max Albums Per Search* (default 5; each one costs a lookup), *Only Matching Artist*, and a
-manual *Release Quality* override.
+Indexer options: *Max Albums Per Search* (default 5; each one costs a lookup), *Minimum Name Match* (default
+80%: album title and artist must match at least this closely; case, accents, punctuation and a bracketed suffix
+like "(Deluxe Edition)" are ignored), *Only Matching Artist*, and a manual *Release Quality* override.
+
+When YouTube Music's album search has nothing with the wanted title (common for singles and EPs), the indexer
+also searches songs and uses the album those songs belong to.
 
 ## Music that is not on MusicBrainz
 

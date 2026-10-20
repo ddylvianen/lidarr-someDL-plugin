@@ -40,6 +40,64 @@ namespace NzbDrone.Plugin.SomeDL
 
         [JsonProperty("artists")]
         public List<SomeDLArtist> Artists { get; set; } = new ();
+
+        // Not in search hits; filled in when the hit was built from an album page, which has it
+        [JsonProperty("duration_seconds")]
+        public int? DurationSeconds { get; set; }
+    }
+
+    public class SomeDLSongSearchResponse
+    {
+        [JsonProperty("result")]
+        public List<SomeDLSongHit> Result { get; set; } = new ();
+    }
+
+    public class SomeDLSongHit
+    {
+        [JsonProperty("title")]
+        public string Title { get; set; }
+
+        [JsonProperty("artists")]
+        public List<SomeDLArtist> Artists { get; set; } = new ();
+
+        [JsonProperty("album")]
+        public SomeDLAlbumRef Album { get; set; }
+    }
+
+    public class SomeDLAlbumRef
+    {
+        [JsonProperty("id")]
+        public string Id { get; set; }
+
+        [JsonProperty("name")]
+        public string Name { get; set; }
+    }
+
+    public class SomeDLAlbumPageResponse
+    {
+        [JsonProperty("album_data")]
+        public SomeDLAlbumPage AlbumData { get; set; }
+    }
+
+    public class SomeDLAlbumPage
+    {
+        [JsonProperty("title")]
+        public string Title { get; set; }
+
+        [JsonProperty("type")]
+        public string Type { get; set; }
+
+        [JsonProperty("year")]
+        public string Year { get; set; }
+
+        [JsonProperty("audioPlaylistId")]
+        public string AudioPlaylistId { get; set; }
+
+        [JsonProperty("duration_seconds")]
+        public int? DurationSeconds { get; set; }
+
+        [JsonProperty("artists")]
+        public List<SomeDLArtist> Artists { get; set; } = new ();
     }
 
     public class SomeDLArtist

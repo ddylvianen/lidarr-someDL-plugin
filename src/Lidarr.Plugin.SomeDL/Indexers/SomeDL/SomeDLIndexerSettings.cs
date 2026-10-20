@@ -11,6 +11,7 @@ namespace NzbDrone.Core.Indexers.SomeDL
         {
             RuleFor(c => c.BaseUrl).ValidRootUrl();
             RuleFor(c => c.MaxAlbumsPerSearch).InclusiveBetween(1, 20);
+            RuleFor(c => c.MinimumNameMatch).InclusiveBetween(0, 100);
         }
     }
 
@@ -27,8 +28,11 @@ namespace NzbDrone.Core.Indexers.SomeDL
         [FieldDefinition(2, Type = FieldType.Number, Label = "Max Albums Per Search", HelpText = "YouTube Music hits looked at per search. Each one costs an extra lookup in SomeDL for its length, which Lidarr needs for its size checks")]
         public int MaxAlbumsPerSearch { get; set; } = 5;
 
-        [FieldDefinition(3, Type = FieldType.Checkbox, Label = "Only Matching Artist", HelpText = "Skip hits whose artist does not resemble the searched artist, before looking up their length. Saves lookups; turn off for artists credited differently on YouTube", Advanced = true)]
+        [FieldDefinition(3, Type = FieldType.Checkbox, Label = "Only Matching Artist", HelpText = "Skip hits whose artist does not match the searched artist (see Minimum Name Match). Turn off for artists credited differently on YouTube", Advanced = true)]
         public bool OnlyMatchingArtist { get; set; } = true;
+
+        [FieldDefinition(5, Type = FieldType.Number, Label = "Minimum Name Match", Unit = "%", HelpText = "How closely a YouTube Music album title, and its artist, must match what Lidarr searches for. Case, accents, punctuation and a bracketed suffix such as (Deluxe Edition) are ignored", Advanced = true)]
+        public int MinimumNameMatch { get; set; } = 80;
 
         [FieldDefinition(4, Type = FieldType.Number, Label = "Early Download Limit", Unit = "days", HelpText = "Days before release date to allow downloads. Empty is no limit", Advanced = true)]
         public int? EarlyReleaseLimit { get; set; }

@@ -4,7 +4,7 @@
 set -e
 cd "$(dirname "$0")"
 
-PLUGIN_VERSION=${PLUGIN_VERSION:-0.2.0.0}
+PLUGIN_VERSION=${PLUGIN_VERSION:-0.3.0.0}
 # Lidarr only loads a plugin built against a Lidarr.Core no newer than itself, so the submodule is
 # stamped with the oldest Lidarr the plugin supports (same trick as the GitHub workflow).
 MINIMUM_LIDARR_VERSION=${MINIMUM_LIDARR_VERSION:-3.1.5.5066}
