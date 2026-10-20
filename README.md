@@ -51,6 +51,18 @@ sh install-somedl.sh /data/somedl      # download folder; Lidarr must be able to
 
 Running it again updates SomeDL. Logs: `journalctl -u somedl -f`. In Lidarr use host `127.0.0.1`, port `5000`.
 
+**SomeDL in its own LXC.** Three things have to line up:
+
+1. *One shared folder, mounted once, on the same path in both LXCs.* On the Proxmox host, mount the parent folder
+   that holds both the downloads and the library, e.g.
+   `pct set <lidarr-id> -mp0 /tank/media,mp=/data` and `pct set <somedl-id> -mp0 /tank/media,mp=/data`.
+   Then `/data/somedl` and `/data/music` (your Lidarr root folder) are the same files in both. Mount the
+   parent, not the two subfolders separately: moves and hardlinks don't work across two mount points.
+2. *The same user ID.* Check which UID Lidarr runs as in its LXC (`ps -o uid= -C Lidarr`, usually 0 for
+   root) and install with that UID: `SOMEDL_UID=0 sh install-somedl.sh /data/somedl`. In unprivileged LXCs
+   the same UID inside maps to the same owner on the host, so Lidarr may move what SomeDL downloads.
+3. *In Lidarr, the IP of the SomeDL LXC* as host (client) and `http://<ip>:5000` as URL (indexer).
+
 ## Setup
 
 1. **SomeDL output template.** In the SomeDL WebUI (`http://<host>:5000`, settings) or in

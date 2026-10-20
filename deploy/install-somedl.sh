@@ -1,6 +1,7 @@
 #!/bin/sh
 # Installs SomeDL as a systemd service on Debian/Ubuntu, e.g. in the Proxmox LXC that runs Lidarr.
 # Run as root:   sh install-somedl.sh [download folder]      (default: /data/somedl)
+# Lidarr in another LXC: SOMEDL_UID=<uid Lidarr runs as there> sh install-somedl.sh /data/somedl
 #
 # - SomeDL goes in a Python venv in /opt/somedl, its settings in /var/lib/somedl
 # - it runs as the same user as the 'lidarr' service, so Lidarr can move the files it downloads
@@ -13,9 +14,18 @@ SERVICE_URL=https://raw.githubusercontent.com/ddylvianen/lidarr-someDL-plugin/ma
 
 [ "$(id -u)" = 0 ] || { echo "Run as root"; exit 1; }
 
-# Same user as Lidarr; override with SOMEDL_USER=... if Lidarr's service has another name
-RUN_USER=${SOMEDL_USER:-$(systemctl show -p User --value lidarr 2>/dev/null || true)}
-RUN_USER=${RUN_USER:-root}
+# Same user as Lidarr, so Lidarr may move the files. When Lidarr runs in another LXC, pass the UID
+# Lidarr runs as there (SOMEDL_UID=1000); a user with that UID is then used or created here.
+if [ -n "${SOMEDL_UID:-}" ]; then
+    RUN_USER=$(getent passwd "$SOMEDL_UID" | cut -d: -f1)
+    if [ -z "$RUN_USER" ]; then
+        RUN_USER=somedl
+        useradd --system --uid "$SOMEDL_UID" --user-group --home-dir /var/lib/somedl --no-create-home "$RUN_USER"
+    fi
+else
+    RUN_USER=${SOMEDL_USER:-$(systemctl show -p User --value lidarr 2>/dev/null || true)}
+    RUN_USER=${RUN_USER:-root}
+fi
 RUN_GROUP=$(id -gn "$RUN_USER")
 echo "SomeDL will run as $RUN_USER:$RUN_GROUP and download into $OUTPUT"
 
