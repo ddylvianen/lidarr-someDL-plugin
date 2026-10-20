@@ -11,8 +11,9 @@ Keeps a music library in FLAC without losing any quality:
      its tags are the same and its covers decode to the same pixels.
 
 Tags and embedded covers are kept. A converted original is only deleted after the new FLAC passed
-`flac -t`. Files changed in the last --min-age minutes are skipped (downloads, imports in progress), and
-files already done are remembered in --state, so a nightly run only handles what is new.
+`flac -t`. Files changed in the last --min-age minutes are skipped (downloads, imports in progress).
+Every file is handled once: finished files are remembered by path, size and date, and also by a hash of
+their audio packets, so a file Lidarr renamed, moved or retagged is recognised and left alone too.
 
   music_flac.py /data/music                      do it
   music_flac.py /data/music --dry-run            only show what would happen
@@ -144,7 +145,7 @@ def recompress(path, dry_run):
         return False
     saved = before - os.path.getsize(path)
     if saved > 0:
-        print(f"compressed     {path}  (-{saved / 1048576:.1f} MB)")
+        print(f"compressed     {path}  (-{human(saved)})")
     return True
 
 
@@ -368,6 +369,9 @@ def main():
 
     library = os.path.abspath(a.library)
     state = load_state(a.state)
+    # audio packet hash -> "slim" (all steps done) or "base" (converted/recompressed only)
+    audio_path = os.path.join(os.path.dirname(a.state) or ".", "audio.json")
+    audio_done = load_state(audio_path)
     cutoff = time.time() - a.min_age * 60
     renamed_folders, converted, compressed, slimmed, handled = set(), 0, 0, 0, 0
 
@@ -385,6 +389,7 @@ def main():
         this_run.update(converted=converted, recompressed=compressed, slimmed=slimmed)
         stats.update(saved_bytes=base_saved + this_run["saved_bytes"], files=base_files + this_run["files"])
         save_state(a.state, state)
+        save_state(audio_path, audio_done)
         save_state(stats_path, stats)
 
     for folder, _dirs, files in os.walk(library):
@@ -398,14 +403,24 @@ def main():
                 size_before = os.path.getsize(path)
             except OSError:
                 continue
-            # [size, mtime] = converted/recompressed (also by older versions); + "slim" = step 3 done too
+            if extension not in LOSSLESS_EXTENSIONS and extension not in TAGGED_EXTENSIONS:
+                continue
+
+            # Fast: the same path, size and date as when it was finished. [size, mtime] means
+            # converted/recompressed (also by older versions); + "slim" means step 3 is done too.
             done = state.get(path)
             if done == current + ["slim"] or (done == current and not slimming):
                 continue
             only_slim = done == current
 
-            if extension not in LOSSLESS_EXTENSIONS and extension not in TAGGED_EXTENSIONS:
+            # Otherwise the audio itself: renaming, moving or retagging a file leaves its packets as they are
+            key = packets_md5(path)
+            level = audio_done.get(key)
+            if level == "slim" or (level == "base" and not slimming):
+                state[path] = current + (["slim"] if level == "slim" else [])
                 continue
+            only_slim = only_slim or level == "base"
+            packets_changed = False
 
             if not only_slim and extension in LOSSLESS_EXTENSIONS and codec_of(path).startswith(LOSSLESS_CODECS):
                 new = to_flac(path, a.dry_run)
@@ -415,11 +430,13 @@ def main():
                 renamed_folders.add(folder)
                 state.pop(path, None)
                 path = new
+                packets_changed = True
 
             if not only_slim and path.lower().endswith(".flac") and not a.no_recompress:
                 if not recompress(path, a.dry_run):
                     continue  # not remembered, so the next run tries again
                 compressed += 1
+                packets_changed = True
 
             # Last, because flac -8 writes fresh padding of its own
             if slimming and os.path.splitext(path)[1].lower() in TAGGED_EXTENSIONS:
@@ -435,6 +452,8 @@ def main():
 
             if not a.dry_run and os.path.exists(path):
                 state[path] = fingerprint(path) + (["slim"] if slimming else [])
+                # slimming leaves the packets alone; converting and recompressing write new ones
+                audio_done[packets_md5(path) if packets_changed else key] = "slim" if slimming else "base"
                 saved = size_before - os.path.getsize(path)
                 if saved:
                     this_run["saved_bytes"] += saved
