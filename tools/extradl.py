@@ -23,6 +23,7 @@ Downloads go to <output>/<job id>/<Artist> - <Album>/<NN> - <Title>.<ext> in the
 Needs yt-dlp and mutagen (both come with SomeDL) and ffmpeg.
 """
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -72,7 +73,7 @@ def http_json(url, data=None):
 
 
 def ydl(extra=None):
-    options = {"quiet": True, "no_warnings": True, "noprogress": True}
+    options = {"quiet": True, "no_warnings": True, "noprogress": True, "socket_timeout": 20}
     options.update(extra or {})
     return yt_dlp.YoutubeDL(options)
 
@@ -277,6 +278,45 @@ def search_audius(artist, album):
 
 SEARCHERS = {"bandcamp": search_bandcamp, "soundcloud": search_soundcloud, "jamendo": search_jamendo,
              "archive": search_archive, "audius": search_audius}
+
+
+def search_all(artist, album, sources):
+    """All sources at once: Lidarr runs only three tasks at a time, so a search that waits on one slow site
+    after another holds up its whole task queue."""
+    sources = [s for s in dict.fromkeys(sources) if s in SEARCHERS]
+    results, errors = [], {}
+
+    def one(source):
+        try:
+            found = SEARCHERS[source](artist, album)
+            log(f"search {source}: {artist} - {album or '*'}: {len(found)} hit(s)")
+            return source, found, None
+        except Exception as e:  # one site down must not hide the other
+            log(f"search {source}: {artist} - {album or '*'}: FAILED: {str(e)[:200]}")
+            return source, [], str(e)[:200]
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(len(sources), 1)) as pool:
+        for source, found, error in pool.map(one, sources):
+            results += found
+            if error:
+                errors[source] = error
+    return {"results": results, "errors": errors}
+
+
+DETAILS_CACHE = {}
+DETAILS_TTL = 6 * 3600
+
+
+def cached_details(url):
+    """Details of an album hardly change, and Lidarr asks for the same hits on every search of an album."""
+    hit = DETAILS_CACHE.get(url)
+    if hit and time.time() - hit[0] < DETAILS_TTL:
+        return hit[1]
+    value = details(url)
+    if len(DETAILS_CACHE) > 2000:
+        DETAILS_CACHE.clear()
+    DETAILS_CACHE[url] = (time.time(), value)
+    return value
 
 
 def archive_files(identifier):
@@ -555,19 +595,10 @@ def make_handler(jobs):
                 if url.path == "/api/search":
                     if not query.get("artist"):
                         return self.reply(400, {"error": "artist required"})
-                    results, errors = [], {}
-                    for source in query.get("sources", "bandcamp,soundcloud").split(","):
-                        if source in SEARCHERS:
-                            try:
-                                found = SEARCHERS[source](query["artist"], query.get("album"))
-                                results += found
-                                log(f"search {source}: {query['artist']} - {query.get('album') or '*'}: {len(found)} hit(s)")
-                            except Exception as e:  # one site down must not hide the other
-                                errors[source] = str(e)[:200]
-                                log(f"search {source}: {query['artist']} - {query.get('album') or '*'}: FAILED: {str(e)[:200]}")
-                    return self.reply(200, {"results": results, "errors": errors})
+                    return self.reply(200, search_all(query["artist"], query.get("album"),
+                                                      query.get("sources", "bandcamp,soundcloud").split(",")))
                 if url.path == "/api/details":
-                    return self.reply(200, details(query["url"]))
+                    return self.reply(200, cached_details(query["url"]))
                 if url.path == "/api/jobs":
                     return self.reply(200, {"jobs": list(jobs.jobs.values())})
                 return self.reply(404, {"error": "not found"})
