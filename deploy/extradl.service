@@ -2,7 +2,7 @@
 # install-somedl.sh fills in @USER@, @GROUP@ and @OUTPUT@.
 
 [Unit]
-Description=extradl (Bandcamp/SoundCloud for Lidarr)
+Description=extradl (extra music sources for Lidarr)
 After=network-online.target
 Wants=network-online.target
 

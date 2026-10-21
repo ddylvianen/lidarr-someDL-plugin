@@ -48,6 +48,14 @@ namespace NzbDrone.Plugin.SomeDL.ExtraDL
 
         [JsonProperty("duration_seconds")]
         public int? DurationSeconds { get; set; }
+
+        // flac24, flac or mp3 where the site says; Bandcamp and SoundCloud leave it out
+        [JsonProperty("format")]
+        public string Format { get; set; }
+
+        // Recording date (YYYY-MM-DD) of an Internet Archive concert
+        [JsonProperty("date")]
+        public string Date { get; set; }
     }
 
     public class ExtraDLDetails

@@ -49,13 +49,14 @@ namespace NzbDrone.Core.Indexers.ExtraDL
 
             if (request?.Album != null)
             {
-                foreach (var miss in hits.Where(h => !NameMatch.Matches(request.Album, h.Title, _settings.MinimumNameMatch)))
+                foreach (var miss in hits.Where(h => !TitleMatches(request.Album, h)))
                 {
                     _logger.Debug("extradl: skipping {0} '{1}', title matches '{2}' for {3:P0}", miss.Source, miss.Title, request.Album, NameMatch.Similarity(request.Album, miss.Title));
                 }
 
-                hits = hits.Where(h => NameMatch.Matches(request.Album, h.Title, _settings.MinimumNameMatch))
-                    .OrderByDescending(h => NameMatch.Similarity(request.Album, h.Title))
+                // A same-date concert counts as a full match; ties keep the order extradl gave (best tape first)
+                hits = hits.Where(h => TitleMatches(request.Album, h))
+                    .OrderByDescending(h => NameMatch.SameDate(request.Album, h.Title, h.Date) ? 1.0 : NameMatch.Similarity(request.Album, h.Title))
                     .ToList();
             }
 
@@ -90,14 +91,31 @@ namespace NzbDrone.Core.Indexers.ExtraDL
             return releases;
         }
 
+        private bool TitleMatches(string wanted, ExtraDLHit hit)
+        {
+            return NameMatch.Matches(wanted, hit.Title, _settings.MinimumNameMatch) || NameMatch.SameDate(wanted, hit.Title, hit.Date);
+        }
+
+        // What each site serves, so Lidarr's label (from the release title) matches the files it imports:
+        // title tag, nominal kbps for the size estimate, codec, container, site name
+        private static (string Tag, int Kbps, string Codec, string Container, string Site) QualityOf(ExtraDLHit hit)
+        {
+            return (hit.Source, hit.Format) switch
+            {
+                ("bandcamp", _) => ("MP3 128", 128, "MP3", "MP3", "Bandcamp"),
+                ("soundcloud", _) => ("AAC VBR", 160, "AAC", "M4A", "SoundCloud"),
+                ("jamendo", _) => ("FLAC", 900, "FLAC", "FLAC", "Jamendo"),
+                ("audius", _) => ("MP3 320", 320, "MP3", "MP3", "Audius"),
+                ("archive", "flac24") => ("FLAC 24bit", 2300, "FLAC", "FLAC", "Internet Archive"),
+                ("archive", "flac") => ("FLAC", 900, "FLAC", "FLAC", "Internet Archive"),
+                ("archive", _) => ("MP3 V0 VBR", 200, "MP3", "MP3", "Internet Archive"),
+                _ => ("WEB", 192, null, null, hit.Source)
+            };
+        }
+
         private static ReleaseInfo ToRelease(ExtraDLHit hit, int seconds, int? year)
         {
-            // What each site serves, so Lidarr's label matches the files it will import: Bandcamp's free
-            // stream is MP3 128 kbps, SoundCloud's AAC around 160 kbps (Lidarr files that as AAC-VBR)
-            var bandcamp = hit.Source == "bandcamp";
-            var tag = bandcamp ? "MP3 128" : "AAC VBR";
-            var kbps = bandcamp ? 128 : 160;
-            var source = bandcamp ? "Bandcamp" : "SoundCloud";
+            var (tag, kbps, codec, container, source) = QualityOf(hit);
 
             return new ReleaseInfo
             {
@@ -111,8 +129,8 @@ namespace NzbDrone.Core.Indexers.ExtraDL
                 PublishDate = year > 1900 ? new DateTime(year.Value, 1, 1, 0, 0, 0, DateTimeKind.Utc) : DateTime.UtcNow,
                 DownloadProtocol = nameof(ExtraDLDownloadProtocol),
                 Source = source,
-                Codec = bandcamp ? "MP3" : "AAC",
-                Container = bandcamp ? "MP3" : "M4A"
+                Codec = codec,
+                Container = container
             };
         }
     }

@@ -60,6 +60,25 @@ namespace NzbDrone.Plugin.SomeDL
             return false;
         }
 
+        private static readonly Regex Date = new (@"(\d{4})[-./](\d{2})[-./](\d{2})", RegexOptions.Compiled);
+
+        /// <summary>
+        /// A recording of a concert is named by venue on one site and by date on another
+        /// ("1977-05-08: Barton Hall" against "Live at Barton Hall on 1977-05-08"); the same date in the
+        /// wanted title and in the hit means the same show.
+        /// </summary>
+        public static bool SameDate(string wanted, string foundTitle, string foundDate)
+        {
+            var a = Date.Match(wanted ?? string.Empty);
+            if (!a.Success)
+            {
+                return false;
+            }
+
+            var b = Date.Match($"{foundDate} {foundTitle}");
+            return b.Success && a.Groups[1].Value == b.Groups[1].Value && a.Groups[2].Value == b.Groups[2].Value && a.Groups[3].Value == b.Groups[3].Value;
+        }
+
         public static bool IsVariousArtists(string name)
         {
             var normalized = Normalize(name);

@@ -110,6 +110,6 @@ curl -sf -X POST http://127.0.0.1:5000/settings-apply -H 'Content-Type: applicat
 
 echo "SomeDL $(curl -s http://127.0.0.1:5000/get-version | sed 's/.*"v":"\([^"]*\)".*/\1/') runs on port 5000."
 echo "In Lidarr use host 127.0.0.1 (same machine) or this machine's IP, port 5000."
-echo "Bandcamp/SoundCloud (extradl) runs on port 5050: add it in Lidarr as indexer and download client too."
+echo "Extra sources (extradl: Bandcamp, SoundCloud, Jamendo, Internet Archive, Audius) run on port 5050: add it in Lidarr as indexer and download client too."
 [ -z "$LIBRARY" ] || echo "WebUI downloads move to $LIBRARY after 30 idle minutes (log: journalctl -u somedl-mover)."
 echo "Add a YouTube Music album to MusicBrainz: somedl-seed \"artist album\" (somedl-seed --help)"

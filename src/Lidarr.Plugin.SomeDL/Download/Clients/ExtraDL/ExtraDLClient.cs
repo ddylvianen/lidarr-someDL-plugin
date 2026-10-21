@@ -38,7 +38,7 @@ namespace NzbDrone.Core.Download.Clients.ExtraDL
             _proxy = proxy;
         }
 
-        public override string Name => "Bandcamp/SoundCloud (extradl)";
+        public override string Name => "Extra sources (extradl)";
 
         public override string Protocol => nameof(ExtraDLDownloadProtocol);
 

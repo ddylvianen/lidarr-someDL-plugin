@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """
-extradl: searches and downloads albums from Bandcamp and SoundCloud for the Lidarr plugin, next to SomeDL.
+extradl: searches and downloads albums from Bandcamp, SoundCloud, Jamendo, the Internet Archive and Audius
+for the Lidarr plugin, next to SomeDL.
 
 Small HTTP API (JSON), used by the plugin's "Bandcamp/SoundCloud" indexer and download client:
 
   GET    /api/version
-  GET    /api/search?artist=..&album=..&sources=bandcamp,soundcloud   albums (and single tracks) found
+  GET    /api/search?artist=..&album=..&sources=bandcamp,soundcloud,jamendo,archive,audius
+                                                                      albums (and single tracks) found
   GET    /api/details?url=..                                          track count and length of one hit
   POST   /api/download   {"url", "artist", "album", "year"}          queue an album, returns {"id"}
   GET    /api/jobs                                                    every job with its progress
   DELETE /api/jobs/<id>?delete_files=1                                forget a job (and delete its files)
 
 Downloads go to <output>/<job id>/<Artist> - <Album>/<NN> - <Title>.<ext> in the format the site serves
+(Jamendo and many Internet Archive recordings are FLAC)
 (no re-encoding), tagged (album, album artist, artist, title, track number, year, cover), with the
 .lidarr-somedl marker so somedl_mover.py leaves them to Lidarr. Jobs survive a restart.
 
@@ -20,9 +23,11 @@ Downloads go to <output>/<job id>/<Artist> - <Album>/<NN> - <Title>.<ext> in the
 Needs yt-dlp and mutagen (both come with SomeDL) and ffmpeg.
 """
 import argparse
+import hashlib
 import json
 import os
 import queue
+import random
 import re
 import shutil
 import threading
@@ -57,7 +62,8 @@ def ydl(extra=None):
 
 # --- search -----------------------------------------------------------------------------------
 
-def search_bandcamp(query):
+def search_bandcamp(artist, album):
+    query = f"{artist} {album or ''}".strip()
     data = http_json("https://bandcamp.com/api/bcsearch_public_api/1/autocomplete_elastic",
                      {"search_text": query, "search_filter": "", "full_page": False, "fan_id": None})
     results = []
@@ -90,7 +96,8 @@ def soundcloud_client_id(refresh=False):
     return SOUNDCLOUD_CLIENT["id"]
 
 
-def search_soundcloud(query):
+def search_soundcloud(artist, album):
+    query = f"{artist} {album or ''}".strip()
     results = []
     for kind in ("albums", "tracks"):
         for attempt in (0, 1):
@@ -105,7 +112,8 @@ def search_soundcloud(query):
         for hit in data.get("collection", []):
             if kind == "albums" and hit.get("set_type") not in ("album", "ep", "single", "compilation"):
                 continue  # user playlists are not releases
-            date = hit.get("release_date") or hit.get("display_date") or hit.get("created_at") or ""
+            # not created_at: that is the upload, often years after the release, and Lidarr rejects a wrong year
+            date = hit.get("release_date") or hit.get("display_date") or ""
             results.append({
                 "source": "soundcloud",
                 "type": "single" if kind == "tracks" else (hit.get("set_type") or "album"),
@@ -119,11 +127,172 @@ def search_soundcloud(query):
     return results
 
 
-SEARCHERS = {"bandcamp": search_bandcamp, "soundcloud": search_soundcloud}
+def jamendo_api(path, query):
+    """Jamendo's own web API, signed the way its site (and yt-dlp) does it; no API key needed."""
+    salt = str(random.random())
+    signature = hashlib.sha1((path + salt).encode()).hexdigest()
+    request = urllib.request.Request("https://www.jamendo.com" + path + "?" + urllib.parse.urlencode(query, doseq=True),
+                                     headers={"User-Agent": USER_AGENT, "X-Jam-Call": f"${signature}*{salt}~"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.load(response)
+
+
+def search_jamendo(artist, album):
+    albums = jamendo_api("/api/search", {"query": f"{artist} {album or ''}".strip(), "type": "album", "limit": 10})
+    albums = [a for a in albums if a.get("type") == "album" and a.get("id")]
+    if not albums:
+        return []
+    names = {a["id"]: a.get("name") for a in jamendo_api("/api/artists", {"id[]": sorted({a["artistId"] for a in albums})})}
+    released = {a["id"]: a.get("dateReleased") for a in jamendo_api("/api/albums", {"id[]": [a["id"] for a in albums]})}
+    results = []
+    for a in albums:
+        when = released.get(a["id"])
+        results.append({
+            "source": "jamendo",
+            "type": "album",
+            "url": f"https://www.jamendo.com/album/{a['id']}",
+            "title": a.get("name"),
+            "artist": names.get(a["artistId"]),
+            "year": time.gmtime(when).tm_year if when else None,
+            "track_count": None,
+            "duration_seconds": None,
+            "format": "flac",
+        })
+    return results
+
+
+DATE = re.compile(r"(\d{4})[-./](\d{2})[-./](\d{2})")
+
+
+def archive_quote(text):
+    return '"' + re.sub(r'["\\]', " ", text) + '"'
+
+
+def search_archive(artist, album):
+    """Live recordings on the Internet Archive. MusicBrainz names a concert by its date, the Archive by
+    venue and date, so a date in the album title is searched as a date."""
+    date = DATE.search(album or "")
+    # Live Music Archive concerts are mediatype "etree", other recordings "audio"
+    query = f"creator:{archive_quote(artist)} AND mediatype:(audio OR etree)"
+    if date:
+        query += " AND date:" + "-".join(date.groups())
+    elif album:
+        query += f" AND title:({re.sub(r'[^0-9A-Za-z ]+', ' ', album)})"
+    data = http_json("https://archive.org/advancedsearch.php?" + urllib.parse.urlencode(
+        [("q", query), ("fl[]", "identifier"), ("fl[]", "title"), ("fl[]", "creator"), ("fl[]", "date"),
+         ("fl[]", "format"), ("fl[]", "downloads"), ("fl[]", "access-restricted-item"), ("rows", "40"), ("output", "json")]))
+    results = []
+    for doc in data.get("response", {}).get("docs", []):
+        if str(doc.get("access-restricted-item")).lower() == "true":
+            continue  # stream-only by agreement with the artist (Grateful Dead soundboards, for one)
+        formats = doc.get("format") or []
+        formats = formats if isinstance(formats, list) else [formats]
+        if "24bit Flac" in formats:
+            fmt = "flac24"
+        elif "Flac" in formats:
+            fmt = "flac"
+        elif "VBR MP3" in formats:
+            fmt = "mp3"
+        else:
+            continue  # nothing a player can use (only Shorten, say)
+        creator = doc.get("creator")
+        results.append({
+            "source": "archive",
+            "type": "album",
+            "url": f"https://archive.org/details/{doc['identifier']}",
+            "title": doc.get("title"),
+            "artist": creator[0] if isinstance(creator, list) else creator,
+            "year": int(str(doc.get("date"))[:4]) if str(doc.get("date") or "")[:4].isdigit() else None,
+            "date": str(doc.get("date") or "")[:10] or None,
+            "track_count": None,
+            "duration_seconds": None,
+            "format": fmt,
+            "downloads": doc.get("downloads") or 0,
+        })
+    # A popular show has dozens of tapes: lossless first, then the most downloaded
+    rank = {"flac24": 0, "flac": 1, "mp3": 2}
+    results.sort(key=lambda r: (rank[r["format"]], -r["downloads"]))
+    return results
+
+
+AUDIUS = {"host": None, "at": 0}
+
+
+def audius_api(path, query=None):
+    if not AUDIUS["host"] or time.time() - AUDIUS["at"] > 3600:
+        AUDIUS.update(host=http_json("https://api.audius.co")["data"][0], at=time.time())
+    query = dict(query or {}, app_name="lidarr-extradl")
+    return http_json(f"{AUDIUS['host']}/v1/{path}?{urllib.parse.urlencode(query)}")
+
+
+def search_audius(artist, album):
+    """Albums of verified Audius artists; anyone can upload under any name, so unverified accounts are
+    left out."""
+    results = []
+    users = [u for u in audius_api("users/search", {"query": artist}).get("data", []) if u.get("is_verified")][:3]
+    for user in users:
+        for a in audius_api(f"users/{user['id']}/albums").get("data", []):
+            results.append({
+                "source": "audius",
+                "type": "album",
+                "url": "https://audius.co" + a["permalink"],
+                "title": a.get("playlist_name"),
+                "artist": user.get("name"),
+                # Audius dates are when it was put on Audius (2021 for an album from 2013), and a wrong year
+                # makes Lidarr reject the release, so none is given
+                "year": None,
+                "track_count": a.get("track_count"),
+                "duration_seconds": None,
+                "format": "mp3",
+            })
+    return results
+
+
+SEARCHERS = {"bandcamp": search_bandcamp, "soundcloud": search_soundcloud, "jamendo": search_jamendo,
+             "archive": search_archive, "audius": search_audius}
+
+
+def archive_files(identifier):
+    """The audio files of an Archive item in track order: the FLAC originals when there are any, else the
+    VBR MP3s the Archive derived (from Shorten tapes, for instance)."""
+    meta = http_json(f"https://archive.org/metadata/{identifier}")
+    files = meta.get("files", [])
+    for wanted in (("24bit Flac",), ("Flac",), ("VBR MP3",)):
+        chosen = [f for f in files if f.get("format") in wanted]
+        if chosen:
+            break
+    else:
+        return meta, []
+
+    def order(f):
+        track = re.match(r"\d+", str(f.get("track") or ""))
+        return (0, int(track.group())) if track else (1, f.get("name"))
+
+    return meta, sorted(chosen, key=order)
+
+
+def seconds(length):
+    """Archive lengths come as seconds ('325.4') or as 'MM:SS'."""
+    text = str(length or "0")
+    if ":" in text:
+        total = 0
+        for part in text.split(":"):
+            total = total * 60 + float(part or 0)
+        return total
+    try:
+        return float(text)
+    except ValueError:
+        return 0
 
 
 def details(url):
     """Track count, length and year of one album or track; search hits do not always have them."""
+    archive = re.match(r"https?://archive\.org/details/([^/?#]+)", url)
+    if archive:
+        meta, files = archive_files(archive.group(1))
+        date = str(meta.get("metadata", {}).get("date") or "")
+        return {"track_count": len(files), "duration_seconds": round(sum(seconds(f.get("length")) for f in files)) or None,
+                "year": int(date[:4]) if date[:4].isdigit() else None}
     with ydl({"skip_download": True}) as y:
         info = y.extract_info(url, download=False)
     entries = [e for e in (info.get("entries") or [info]) if e]
@@ -206,6 +375,10 @@ class Jobs:
             f.write("Downloaded by extradl for Lidarr; somedl_mover.py leaves this folder alone.\n")
         self.update(job["id"], state="downloading", path=folder)
 
+        archive = re.match(r"https?://archive\.org/details/([^/?#]+)", job["url"])
+        if archive:
+            return self.download_archive(job, archive.group(1), folder)
+
         def progress(status):
             if status.get("status") == "finished":
                 done = sum(1 for n in os.listdir(folder) if os.path.splitext(n)[1].lower() in AUDIO_EXTENSIONS)
@@ -237,6 +410,37 @@ class Jobs:
             entry = entries[index - 1] if index <= len(entries) else {}
             tag(os.path.join(folder, name), job, entry, index, len(files))
         self.update(job["id"], state="completed", done=len(files), total=max(len(files), job.get("total") or 0))
+
+
+    def download_archive(self, job, identifier, folder):
+        """Archive items are plain files, fetched directly rather than through yt-dlp, which would pick
+        a lossy derivative over the FLAC originals."""
+        meta, files = archive_files(identifier)
+        if not files:
+            raise RuntimeError("the item has no FLAC or MP3 files")
+        self.update(job["id"], total=len(files))
+        creator = meta.get("metadata", {}).get("creator")
+        creator = creator[0] if isinstance(creator, list) else creator
+
+        for number, f in enumerate(files, 1):
+            extension = os.path.splitext(f["name"])[1].lower()
+            title = f.get("title") or os.path.splitext(os.path.basename(f["name"]))[0]
+            target = os.path.join(folder, f"{number:02d} - {safe_name(title)}{extension}")
+            source = f"https://archive.org/download/{identifier}/{urllib.parse.quote(f['name'])}"
+            request = urllib.request.Request(source, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(request, timeout=120) as response, open(target + ".part", "wb") as out:
+                shutil.copyfileobj(response, out, 1 << 20)
+            os.replace(target + ".part", target)
+            tag(target, job, {"title": title, "artist": creator}, number, len(files))
+            self.update(job["id"], done=number)
+
+        try:  # the item's thumbnail as folder cover, for players that show one
+            request = urllib.request.Request(f"https://archive.org/services/img/{identifier}", headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(request, timeout=30) as response, open(os.path.join(folder, "cover.jpg"), "wb") as out:
+                shutil.copyfileobj(response, out)
+        except OSError:
+            pass
+        self.update(job["id"], state="completed", done=len(files))
 
 
 def safe_name(text):
@@ -290,14 +494,13 @@ def make_handler(jobs):
                 if url.path == "/api/version":
                     return self.reply(200, {"v": VERSION, "yt_dlp": yt_dlp.version.__version__})
                 if url.path == "/api/search":
-                    text = f"{query.get('artist', '')} {query.get('album', '')}".strip()
-                    if not text:
-                        return self.reply(400, {"error": "artist or album required"})
+                    if not query.get("artist"):
+                        return self.reply(400, {"error": "artist required"})
                     results, errors = [], {}
                     for source in query.get("sources", "bandcamp,soundcloud").split(","):
                         if source in SEARCHERS:
                             try:
-                                results += SEARCHERS[source](text)
+                                results += SEARCHERS[source](query["artist"], query.get("album"))
                             except Exception as e:  # one site down must not hide the other
                                 errors[source] = str(e)[:200]
                     return self.reply(200, {"results": results, "errors": errors})

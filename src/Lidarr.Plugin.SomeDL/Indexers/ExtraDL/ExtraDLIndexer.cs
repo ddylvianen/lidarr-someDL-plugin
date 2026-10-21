@@ -10,7 +10,8 @@ using NzbDrone.Plugin.SomeDL.ExtraDL;
 namespace NzbDrone.Core.Indexers.ExtraDL
 {
     /// <summary>
-    /// Searches Bandcamp and SoundCloud through extradl. Every album (or single track) hit becomes one
+    /// Searches Bandcamp, SoundCloud, Jamendo, the Internet Archive and Audius through extradl. Every album
+    /// (or single track) hit becomes one
     /// release whose download URL is its page on that site, which the matching download client hands back.
     /// </summary>
     public class ExtraDLIndexer : HttpIndexerBase<ExtraDLIndexerSettings>
@@ -28,7 +29,7 @@ namespace NzbDrone.Core.Indexers.ExtraDL
             _proxy = proxy;
         }
 
-        public override string Name => "Bandcamp/SoundCloud (extradl)";
+        public override string Name => "Extra sources (extradl)";
         public override string Protocol => nameof(ExtraDLDownloadProtocol);
         public override bool SupportsRss => false;
         public override bool SupportsSearch => true;
