@@ -51,6 +51,11 @@ class Blocked(Exception):
     pass
 
 
+def log(message):
+    """One line per event, for journalctl -u extradl."""
+    print(message, flush=True)
+
+
 def http_json(url, data=None):
     request = urllib.request.Request(url, data=json.dumps(data).encode() if data is not None else None,
                                      headers={"User-Agent": USER_AGENT, "Content-Type": "application/json"})
@@ -353,6 +358,7 @@ class Jobs:
                                  "added": time.time()}
             self.save()
         self.queue.put(job_id)
+        log(f"[{job_id}] queued: {artist} - {album} ({url})")
         return job_id
 
     def update(self, job_id, **fields):
@@ -365,6 +371,8 @@ class Jobs:
         with self.lock:
             job = self.jobs.pop(job_id, None)
             self.save()
+        if job:
+            log(f"[{job_id}] removed by Lidarr{' with its files' if delete_files else ''} ({job['state']})")
         if job and delete_files:
             shutil.rmtree(os.path.join(self.output, job_id), ignore_errors=True)
         return job is not None
@@ -375,10 +383,13 @@ class Jobs:
             job = self.jobs.get(job_id)
             if not job or job["state"] != "queued":
                 continue
+            log(f"[{job_id}] downloading: {job['artist']} - {job['album']}")
             try:
                 self.download(job)
+                log(f"[{job_id}] completed: {self.jobs.get(job_id, {}).get('done')} track(s) in {self.jobs.get(job_id, {}).get('path')}")
             except Exception as e:  # one bad album must not stop the queue
                 self.update(job_id, state="failed", error=str(e)[:500])
+                log(f"[{job_id}] FAILED: {str(e)[:500]}")
 
     def download(self, job):
         folder = os.path.join(self.output, job["id"], safe_name(f"{job['artist']} - {job['album']}"))
@@ -512,9 +523,12 @@ def make_handler(jobs):
                     for source in query.get("sources", "bandcamp,soundcloud").split(","):
                         if source in SEARCHERS:
                             try:
-                                results += SEARCHERS[source](query["artist"], query.get("album"))
+                                found = SEARCHERS[source](query["artist"], query.get("album"))
+                                results += found
+                                log(f"search {source}: {query['artist']} - {query.get('album') or '*'}: {len(found)} hit(s)")
                             except Exception as e:  # one site down must not hide the other
                                 errors[source] = str(e)[:200]
+                                log(f"search {source}: {query['artist']} - {query.get('album') or '*'}: FAILED: {str(e)[:200]}")
                     return self.reply(200, {"results": results, "errors": errors})
                 if url.path == "/api/details":
                     return self.reply(200, details(query["url"]))
