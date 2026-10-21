@@ -13,6 +13,11 @@ knows the album, as long as the artist folder matches; "Rename Tracks" in Lidarr
                                                       folder as well, without taking extra space
   somedl_mover.py ... --dry-run                       only show what would happen
 
+It also removes the folders left behind once their music is gone (moved here, or imported by Lidarr, which
+deletes an album folder but not the artist folder around it): empty ones, and ones holding nothing but
+leftovers such as cover.jpg or the marker, untouched for --min-age minutes. The SomeDL folder itself and
+extradl's folder are kept.
+
 Meant to run every few minutes from a systemd timer (install-somedl.sh sets that up). Standard library only.
 """
 import argparse
@@ -54,6 +59,48 @@ def transfer(src_root, folder, files, library, link, dry_run):
             os.link(source, target) if link else shutil.move(source, target)
         moved += 1
     return target_dir, moved
+
+
+# What may be left in a folder once its music is gone; anything else keeps the folder
+LEFTOVER_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".lrc", ".nfo", ".txt", ".log"}
+
+
+def is_leftover(name):
+    return name in (LIDARR_MARKER, LINKED_MARKER) or os.path.splitext(name)[1].lower() in LEFTOVER_EXTENSIONS
+
+
+def sweep_leftovers(root, min_age, dry_run):
+    """Deepest folders first, so an artist folder empties once its album folders are gone."""
+    keep = {root, os.path.join(root, "extradl")}
+    cutoff = time.time() - min_age * 60
+    removed = 0
+    swept = set()
+    for folder, dirs, files in os.walk(root, topdown=False):
+        if folder in keep:
+            continue
+        try:
+            entries = os.listdir(folder)  # dirs may have been removed below this one already
+            if any(os.path.isdir(os.path.join(folder, e)) for e in entries):
+                continue
+            if not all(is_leftover(e) for e in entries):
+                continue
+            # Removing a subfolder just now touched this folder's date; only its own files count then
+            emptied_here = any(os.path.join(folder, d) in swept for d in dirs)
+            paths = ([] if emptied_here else [folder]) + [os.path.join(folder, e) for e in entries]
+            if paths and max(os.path.getmtime(p) for p in paths) > cutoff:
+                continue
+            if dry_run:
+                print(f"would remove leftover folder: {os.path.relpath(folder, root)} {entries or ''}")
+            else:
+                for e in entries:
+                    os.remove(os.path.join(folder, e))
+                os.rmdir(folder)
+            swept.add(folder)
+            removed += 1
+        except OSError:
+            continue  # changed underneath us (SomeDL writing, Lidarr importing): next run
+    if removed and not dry_run:
+        print(f"removed {removed} leftover folder(s)")
 
 
 def remove_empty_parents(folder, root):
@@ -98,6 +145,8 @@ def main():
                 f.write(f"Hardlinked into {target}\n")
         else:
             remove_empty_parents(folder, src)
+
+    sweep_leftovers(src, a.min_age, a.dry_run)
 
 
 if __name__ == "__main__":
