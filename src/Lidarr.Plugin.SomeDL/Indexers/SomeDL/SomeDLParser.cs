@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Text.RegularExpressions;
 using NLog;
 using NzbDrone.Common.Serializer;
 using NzbDrone.Core.Parser.Model;
@@ -17,8 +15,6 @@ namespace NzbDrone.Core.Indexers.SomeDL
 
         // Album pages looked up when YouTube's album search has nothing with the wanted title
         private const int MaxAlbumsFromSongs = 3;
-
-        private static readonly Regex BracketedSuffix = new (@"\s*[\(\[][^\)\]]*[\)\]]\s*$", RegexOptions.Compiled);
 
         private readonly SomeDLIndexerSettings _settings;
         private readonly ISomeDLProxy _proxy;
@@ -41,20 +37,20 @@ namespace NzbDrone.Core.Indexers.SomeDL
             var candidates = hits
                 .Where(h => h.ResultType == "album" && !string.IsNullOrWhiteSpace(h.PlaylistId) && !string.IsNullOrWhiteSpace(h.Title))
                 .Where(h => h.Artists.Any(a => !string.IsNullOrWhiteSpace(a.Name)))
-                .Where(h => !_settings.OnlyMatchingArtist || request == null || ArtistMatches(request.Artist, h.Artists))
+                .Where(h => !_settings.OnlyMatchingArtist || request == null || ArtistMatches(request.ArtistNames, h.Artists))
                 .ToList();
 
             if (request?.Album != null)
             {
                 foreach (var miss in candidates.Where(h => !NameMatches(request.Album, h.Title)))
                 {
-                    _logger.Debug("SomeDL: skipping '{0}', title matches '{1}' for {2:P0}", miss.Title, request.Album, Similarity(request.Album, miss.Title));
+                    _logger.Debug("SomeDL: skipping '{0}', title matches '{1}' for {2:P0}", miss.Title, request.Album, NameMatch.Similarity(request.Album, miss.Title));
                 }
 
                 // Best match first, so the limit below never cuts off the wanted album
                 candidates = candidates
                     .Where(h => NameMatches(request.Album, h.Title))
-                    .OrderByDescending(h => Similarity(request.Album, h.Title))
+                    .OrderByDescending(h => NameMatch.Similarity(request.Album, h.Title))
                     .ToList();
 
                 // YouTube's album search often leaves out singles and EPs that its song search does find
@@ -88,7 +84,7 @@ namespace NzbDrone.Core.Indexers.SomeDL
             {
                 var albumIds = (_proxy.SearchSongs(_settings.BaseUrl, $"{request.Artist} {request.Album}")?.Result ?? new List<SomeDLSongHit>())
                     .Where(s => !string.IsNullOrWhiteSpace(s.Album?.Id) && NameMatches(request.Album, s.Album.Name))
-                    .Where(s => !_settings.OnlyMatchingArtist || ArtistMatches(request.Artist, s.Artists))
+                    .Where(s => !_settings.OnlyMatchingArtist || ArtistMatches(request.ArtistNames, s.Artists))
                     .Select(s => s.Album.Id)
                     .Distinct()
                     .Take(MaxAlbumsFromSongs);
@@ -125,46 +121,7 @@ namespace NzbDrone.Core.Indexers.SomeDL
 
         private bool NameMatches(string wanted, string found)
         {
-            return Similarity(wanted, found) * 100 >= _settings.MinimumNameMatch;
-        }
-
-        // 0..1, from the edit distance between the normalized names. Also compared without a trailing
-        // bracketed part, so "Album (Deluxe Edition)" and "Album" count as the same name.
-        private static double Similarity(string wanted, string found)
-        {
-            return Math.Max(
-                Ratio(Normalize(wanted), Normalize(found)),
-                Ratio(Normalize(BracketedSuffix.Replace(wanted ?? string.Empty, string.Empty)), Normalize(BracketedSuffix.Replace(found ?? string.Empty, string.Empty))));
-        }
-
-        private static double Ratio(string a, string b)
-        {
-            if (a.Length == 0 || b.Length == 0)
-            {
-                return 0;
-            }
-
-            var previous = new int[b.Length + 1];
-            var current = new int[b.Length + 1];
-
-            for (var j = 0; j <= b.Length; j++)
-            {
-                previous[j] = j;
-            }
-
-            for (var i = 1; i <= a.Length; i++)
-            {
-                current[0] = i;
-                for (var j = 1; j <= b.Length; j++)
-                {
-                    var cost = a[i - 1] == b[j - 1] ? 0 : 1;
-                    current[j] = Math.Min(Math.Min(current[j - 1] + 1, previous[j] + 1), previous[j - 1] + cost);
-                }
-
-                (previous, current) = (current, previous);
-            }
-
-            return 1.0 - ((double)previous[b.Length] / Math.Max(a.Length, b.Length));
+            return NameMatch.Matches(wanted, found, _settings.MinimumNameMatch);
         }
 
         // Search hits carry no length, and Lidarr's quality size limits need one. 0 when unknown.
@@ -181,16 +138,9 @@ namespace NzbDrone.Core.Indexers.SomeDL
             }
         }
 
-        // Generous on purpose: YouTube versions often add bonus tracks or drop an interlude, but a
-        // single or intro sharing the album's name is a fraction of its length
         private static bool LengthFits(int seconds, SomeDLIndexerRequest request)
         {
-            if (seconds <= 0 || request.MinSeconds <= 0)
-            {
-                return true;
-            }
-
-            return seconds >= request.MinSeconds * 0.6 && seconds <= request.MaxSeconds * 1.8;
+            return NameMatch.LengthFits(seconds, request.MinSeconds, request.MaxSeconds);
         }
 
         private ReleaseInfo ToRelease(SomeDLAlbumHit hit, int seconds, SomeDLQualityInfo quality)
@@ -241,42 +191,9 @@ namespace NzbDrone.Core.Indexers.SomeDL
         }
 
         // Any of the credited artists, so "Dreamville, J. Cole" still matches J. Cole
-        private bool ArtistMatches(string searched, IEnumerable<SomeDLArtist> artists)
+        private bool ArtistMatches(List<string> searched, IEnumerable<SomeDLArtist> artists)
         {
-            var wanted = Normalize(searched);
-            if (wanted.Length == 0 || wanted == "variousartists")
-            {
-                return true;
-            }
-
-            return (artists ?? Enumerable.Empty<SomeDLArtist>()).Any(a => NameMatches(searched, a.Name));
-        }
-
-        // Lowercase letters and digits only, accents folded and a leading "the" dropped, so
-        // "The Beatles", "Beatles" and "Beyoncé"/"Beyonce" compare equal
-        private static string Normalize(string name)
-        {
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                return string.Empty;
-            }
-
-            var trimmed = name.Trim();
-            if (trimmed.StartsWith("the ", StringComparison.OrdinalIgnoreCase))
-            {
-                trimmed = trimmed.Substring(4);
-            }
-
-            var builder = new StringBuilder();
-            foreach (var c in trimmed.Normalize(NormalizationForm.FormD))
-            {
-                if (char.IsLetterOrDigit(c))
-                {
-                    builder.Append(char.ToLowerInvariant(c));
-                }
-            }
-
-            return builder.ToString();
+            return (artists ?? Enumerable.Empty<SomeDLArtist>()).Any(a => NameMatch.ArtistMatches(searched, a.Name, _settings.MinimumNameMatch));
         }
     }
 }

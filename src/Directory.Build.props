@@ -62,7 +62,7 @@
     <Copyright>Copyright 2017-$([System.DateTime]::Now.ToString('yyyy')) lidarr.audio (GNU General Public v3)</Copyright>
     
     <!-- Should be replaced by CI -->
-    <AssemblyVersion>0.3.0.0</AssemblyVersion>
+    <AssemblyVersion>0.4.0.0</AssemblyVersion>
     <AssemblyConfiguration>$(Configuration)-dev</AssemblyConfiguration>
 
     <GenerateAssemblyFileVersionAttribute>false</GenerateAssemblyFileVersionAttribute>

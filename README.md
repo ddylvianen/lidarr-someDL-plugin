@@ -99,6 +99,23 @@ like "(Deluxe Edition)" are ignored), *Only Matching Artist*, and a manual *Rele
 When YouTube Music's album search has nothing with the wanted title (common for singles and EPs), the indexer
 also searches songs and uses the album those songs belong to.
 
+## Bandcamp and SoundCloud (second indexer and download client)
+
+The plugin brings a second pair, **Bandcamp/SoundCloud (extradl)**, for music that is not (well) on YouTube:
+underground and local artists, mixtapes, labels that only sell on Bandcamp. It talks to `tools/extradl.py`, a
+small service next to SomeDL (port 5050) that searches both sites and downloads with yt-dlp, without
+re-encoding: Bandcamp's free stream is MP3 128 kbps, SoundCloud's AAC about 160 kbps (Lidarr shows MP3-128 and
+AAC-VBR). Tracks are tagged with the album and artist Lidarr searched for, the site's track titles and the cover.
+
+- `install-somedl.sh` installs and starts it as `extradl.service`; the compose file has an `extradl` service.
+- In Lidarr add *Indexer → Bandcamp/SoundCloud (extradl)* with URL `http://<somedl-host>:5050`, *Download
+  Client → Bandcamp/SoundCloud (extradl)* with host `<somedl-host>`, port `5050`, and tick **ExtraDL** in the
+  delay profile.
+- The same rules as the SomeDL indexer: title and artist must match for 80% (the artist's MusicBrainz aliases
+  count, so Osees finds its Thee Oh Sees albums), and the length must fit the album. User playlists and fan
+  uploads are skipped. Pick the sites per indexer.
+- Audiomack is not included: yt-dlp's Audiomack support is broken at the moment.
+
 ## Music that is not on MusicBrainz
 
 Lidarr only knows artists and albums from its metadata source, MusicBrainz by default. There are three ways

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Core.IndexerSearch.Definitions;
@@ -11,16 +12,18 @@ namespace NzbDrone.Core.Indexers.SomeDL
     /// </summary>
     public class SomeDLIndexerRequest : IndexerRequest
     {
-        public SomeDLIndexerRequest(string baseUrl, string artist, string album, int minSeconds = 0, int maxSeconds = 0)
-            : base(SomeDLProxy.BuildSearchRequest(baseUrl, album == null ? artist : $"{artist} {album}"))
+        public SomeDLIndexerRequest(string baseUrl, List<string> artistNames, string album, int minSeconds = 0, int maxSeconds = 0)
+            : base(SomeDLProxy.BuildSearchRequest(baseUrl, album == null ? artistNames.FirstOrDefault() : $"{artistNames.FirstOrDefault()} {album}"))
         {
-            Artist = artist;
+            ArtistNames = artistNames;
+            Artist = artistNames.FirstOrDefault();
             Album = album;
             MinSeconds = minSeconds;
             MaxSeconds = maxSeconds;
         }
 
         public string Artist { get; }
+        public List<string> ArtistNames { get; }
         public string Album { get; }
 
         // Shortest and longest wanted release of the album on MusicBrainz; 0 when unknown
@@ -56,7 +59,7 @@ namespace NzbDrone.Core.Indexers.SomeDL
             // Plain names rather than Lidarr's Clean*Query: those are '+'-joined for URL query strings,
             // and ytmusicapi searches best on the title as people write it
             return Single(new SomeDLIndexerRequest(_settings.BaseUrl,
-                searchCriteria.Artist.Name,
+                NameMatch.ArtistNames(searchCriteria.Artist),
                 searchCriteria.AlbumTitle,
                 durations.MinOrDefault(),
                 durations.MaxOrDefault()));
@@ -64,7 +67,7 @@ namespace NzbDrone.Core.Indexers.SomeDL
 
         public IndexerPageableRequestChain GetSearchRequests(ArtistSearchCriteria searchCriteria)
         {
-            return Single(new SomeDLIndexerRequest(_settings.BaseUrl, searchCriteria.Artist.Name, null));
+            return Single(new SomeDLIndexerRequest(_settings.BaseUrl, NameMatch.ArtistNames(searchCriteria.Artist), null));
         }
 
         private static IndexerPageableRequestChain Single(IndexerRequest request)

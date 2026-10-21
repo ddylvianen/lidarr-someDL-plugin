@@ -67,6 +67,13 @@ WRAPPER
 chmod 755 /usr/local/bin/somedl-seed
 sed -i -e "s#@USER@#$RUN_USER#" -e "s#@GROUP@#$RUN_GROUP#" -e "s#@OUTPUT@#$OUTPUT#" /etc/systemd/system/somedl.service
 
+# extradl: Bandcamp/SoundCloud for the plugin's second indexer and download client
+fetch tools/extradl.py /opt/somedl/extradl.py
+fetch deploy/extradl.service /etc/systemd/system/extradl.service
+sed -i -e "s#@USER@#$RUN_USER#" -e "s#@GROUP@#$RUN_GROUP#" -e "s#@OUTPUT@#$OUTPUT#" /etc/systemd/system/extradl.service
+mkdir -p "$OUTPUT/extradl"
+chown "$RUN_USER:$RUN_GROUP" "$OUTPUT/extradl"
+
 if [ -n "$LIBRARY" ]; then
     [ -d "$LIBRARY" ] || { echo "Library folder $LIBRARY does not exist"; exit 1; }
     MODE=""
@@ -81,6 +88,8 @@ fi
 systemctl daemon-reload
 systemctl enable somedl >/dev/null 2>&1
 systemctl restart somedl
+systemctl enable extradl >/dev/null 2>&1
+systemctl restart extradl
 if [ -n "$LIBRARY" ]; then
     systemctl enable --now somedl-mover.timer >/dev/null 2>&1
 fi
@@ -101,5 +110,6 @@ curl -sf -X POST http://127.0.0.1:5000/settings-apply -H 'Content-Type: applicat
 
 echo "SomeDL $(curl -s http://127.0.0.1:5000/get-version | sed 's/.*"v":"\([^"]*\)".*/\1/') runs on port 5000."
 echo "In Lidarr use host 127.0.0.1 (same machine) or this machine's IP, port 5000."
+echo "Bandcamp/SoundCloud (extradl) runs on port 5050: add it in Lidarr as indexer and download client too."
 [ -z "$LIBRARY" ] || echo "WebUI downloads move to $LIBRARY after 30 idle minutes (log: journalctl -u somedl-mover)."
 echo "Add a YouTube Music album to MusicBrainz: somedl-seed \"artist album\" (somedl-seed --help)"

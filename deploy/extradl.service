@@ -1,0 +1,21 @@
+# Bandcamp/SoundCloud search and downloads for the Lidarr plugin (tools/extradl.py), next to SomeDL.
+# install-somedl.sh fills in @USER@, @GROUP@ and @OUTPUT@.
+
+[Unit]
+Description=extradl (Bandcamp/SoundCloud for Lidarr)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@GROUP@
+UMask=0002
+Environment=HOME=/var/lib/somedl
+# yt-dlp and mutagen come with SomeDL's venv, which somedl.service keeps up to date
+ExecStart=/opt/somedl/bin/python -u /opt/somedl/extradl.py --output @OUTPUT@/extradl --port 5050
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

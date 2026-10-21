@@ -45,3 +45,21 @@ services:
     ports:
       - 5000:5000
     restart: unless-stopped
+
+  # Bandcamp/SoundCloud for the plugin's second indexer and download client (tools/extradl.py). Same
+  # image as SomeDL for its yt-dlp, mutagen and ffmpeg; the script itself is fetched on start.
+  extradl:
+    image: ghcr.io/fant4zma/somedl:latest
+    container_name: extradl
+    entrypoint:
+      - /bin/sh
+      - -c
+      - pip install --quiet --root-user-action=ignore -U --pre "yt-dlp[default]" || true;
+        curl -fsSL https://raw.githubusercontent.com/ddylvianen/lidarr-someDL-plugin/main/tools/extradl.py -o /tmp/extradl.py &&
+        mkdir -p /data/somedl/extradl && chown 1000:1000 /data/somedl/extradl &&
+        exec gosu 1000:1000 env HOME=/tmp python3 -u /tmp/extradl.py --output /data/somedl/extradl --port 5050
+    volumes:
+      - /data:/data
+    ports:
+      - 5050:5050
+    restart: unless-stopped
