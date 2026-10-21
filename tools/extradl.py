@@ -47,11 +47,23 @@ MARKER = ".lidarr-somedl"
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".opus", ".ogg", ".flac", ".aac", ".wav"}
 
 
+class Blocked(Exception):
+    pass
+
+
 def http_json(url, data=None):
     request = urllib.request.Request(url, data=json.dumps(data).encode() if data is not None else None,
                                      headers={"User-Agent": USER_AGENT, "Content-Type": "application/json"})
     with urllib.request.urlopen(request, timeout=30) as response:
-        return json.load(response)
+        body = response.read()
+    try:
+        return json.loads(body)
+    except ValueError:
+        # A bot check (Bandcamp's "Client Challenge", for one) answers with a web page instead of data
+        site = urllib.parse.urlparse(url).netloc
+        if b"Client Challenge" in body or b"challenge" in body[:4000].lower():
+            raise Blocked(f"{site} is blocking automated requests (bot check); turn this source off until it stops") from None
+        raise Blocked(f"{site} answered with something other than data ({len(body)} bytes)") from None
 
 
 def ydl(extra=None):
