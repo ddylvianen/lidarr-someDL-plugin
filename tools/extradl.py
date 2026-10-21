@@ -114,11 +114,20 @@ def soundcloud_client_id(refresh=False):
     return SOUNDCLOUD_CLIENT["id"]
 
 
-def soundcloud_preview_only(hit):
-    """SoundCloud Go+ tracks (policy SNIP) only play a 30-second preview without a subscription, and BLOCK
-    ones not at all; an album with any of them would come out incomplete."""
+def soundcloud_unplayable(hit):
+    """Why an album or track cannot be downloaded whole, or None. Go+ tracks (policy SNIP) only play a
+    30-second preview without a subscription, BLOCK ones not at all, and tracks whose every stream is
+    encrypted (ctr-/cbc- protocols) are DRM-protected. Album hits list only some tracks in full; the
+    others are not checked here, and the download fails on them instead."""
     tracks = hit.get("tracks") if "tracks" in hit else [hit]
-    return any((t or {}).get("policy") in ("SNIP", "BLOCK") for t in tracks)
+    for t in tracks:
+        t = t or {}
+        if t.get("policy") in ("SNIP", "BLOCK"):
+            return "only 30-second previews (SoundCloud Go+)"
+        protocols = [((x or {}).get("format") or {}).get("protocol") or "" for x in (t.get("media") or {}).get("transcodings") or []]
+        if protocols and all(p.startswith(("ctr-", "cbc-")) for p in protocols):
+            return "DRM-protected"
+    return None
 
 
 def search_soundcloud(artist, album):
@@ -137,8 +146,9 @@ def search_soundcloud(artist, album):
         for hit in data.get("collection", []):
             if kind == "albums" and hit.get("set_type") not in ("album", "ep", "single", "compilation"):
                 continue  # user playlists are not releases
-            if soundcloud_preview_only(hit):
-                log(f"search soundcloud: skipped {hit.get('title')!r}: only 30-second previews (SoundCloud Go+)")
+            unplayable = soundcloud_unplayable(hit)
+            if unplayable:
+                log(f"search soundcloud: skipped {hit.get('title')!r}: {unplayable}")
                 continue
             # not created_at: that is the upload, often years after the release, and Lidarr rejects a wrong year
             date = hit.get("release_date") or hit.get("display_date") or ""
