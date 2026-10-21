@@ -29,7 +29,7 @@ namespace NzbDrone.Core.Indexers.ExtraDL
             _proxy = proxy;
         }
 
-        public override string Name => "Extra sources (extradl)";
+        public override string Name => "Extra sources, combined (extradl)";
         public override string Protocol => nameof(ExtraDLDownloadProtocol);
         public override bool SupportsRss => false;
         public override bool SupportsSearch => true;
@@ -37,7 +37,7 @@ namespace NzbDrone.Core.Indexers.ExtraDL
 
         public override IIndexerRequestGenerator GetRequestGenerator()
         {
-            return new ExtraDLRequestGenerator(Settings);
+            return new ExtraDLRequestGenerator(Settings, Settings.Sources);
         }
 
         public override IParseIndexerResponse GetParser()
@@ -47,21 +47,26 @@ namespace NzbDrone.Core.Indexers.ExtraDL
 
         protected override Task<ValidationFailure> TestConnection()
         {
+            return Task.FromResult(TestExtraDL(_proxy, Settings.BaseUrl, _logger));
+        }
+
+        public static ValidationFailure TestExtraDL(IExtraDLProxy proxy, string baseUrl, Logger logger)
+        {
             try
             {
-                var version = _proxy.GetVersion(Settings.BaseUrl);
+                var version = proxy.GetVersion(baseUrl);
                 if (string.IsNullOrWhiteSpace(version?.Version))
                 {
-                    return Task.FromResult(new ValidationFailure("BaseUrl", "This does not look like extradl: /api/version gave no version"));
+                    return new ValidationFailure("BaseUrl", "This does not look like extradl: /api/version gave no version");
                 }
 
-                _logger.Debug("Connected to extradl {0} (yt-dlp {1})", version.Version, version.YtDlp);
-                return Task.FromResult<ValidationFailure>(null);
+                logger.Debug("Connected to extradl {0} (yt-dlp {1})", version.Version, version.YtDlp);
+                return null;
             }
             catch (Exception ex)
             {
-                _logger.Warn(ex, "Unable to connect to extradl");
-                return Task.FromResult(new ValidationFailure("BaseUrl", $"Unable to connect to extradl: {ex.Message}"));
+                logger.Warn(ex, "Unable to connect to extradl");
+                return new ValidationFailure("BaseUrl", $"Unable to connect to extradl: {ex.Message}");
             }
         }
     }

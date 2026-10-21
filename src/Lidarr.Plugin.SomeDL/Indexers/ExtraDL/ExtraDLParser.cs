@@ -13,11 +13,11 @@ namespace NzbDrone.Core.Indexers.ExtraDL
     {
         private const int FallbackDurationSeconds = 40 * 60;
 
-        private readonly ExtraDLIndexerSettings _settings;
+        private readonly IExtraDLSearchSettings _settings;
         private readonly IExtraDLProxy _proxy;
         private readonly Logger _logger;
 
-        public ExtraDLParser(ExtraDLIndexerSettings settings, IExtraDLProxy proxy, Logger logger)
+        public ExtraDLParser(IExtraDLSearchSettings settings, IExtraDLProxy proxy, Logger logger)
         {
             _settings = settings;
             _proxy = proxy;

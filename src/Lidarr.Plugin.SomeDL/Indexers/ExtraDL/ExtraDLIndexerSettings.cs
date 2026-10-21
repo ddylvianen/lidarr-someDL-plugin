@@ -16,7 +16,15 @@ namespace NzbDrone.Core.Indexers.ExtraDL
         }
     }
 
-    public class ExtraDLIndexerSettings : IIndexerSettings
+    /// <summary>What searching through extradl needs, from the combined indexer or a one-site one.</summary>
+    public interface IExtraDLSearchSettings
+    {
+        string BaseUrl { get; }
+        int MaxAlbumsPerSearch { get; }
+        int MinimumNameMatch { get; }
+    }
+
+    public class ExtraDLIndexerSettings : IIndexerSettings, IExtraDLSearchSettings
     {
         private static readonly ExtraDLIndexerSettingsValidator Validator = new ExtraDLIndexerSettingsValidator();
 

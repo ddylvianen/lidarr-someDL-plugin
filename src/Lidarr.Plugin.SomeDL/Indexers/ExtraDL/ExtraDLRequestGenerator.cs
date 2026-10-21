@@ -9,8 +9,8 @@ namespace NzbDrone.Core.Indexers.ExtraDL
 {
     public class ExtraDLIndexerRequest : IndexerRequest
     {
-        public ExtraDLIndexerRequest(ExtraDLIndexerSettings settings, List<string> artistNames, string album, int minSeconds = 0, int maxSeconds = 0)
-            : base(ExtraDLProxy.BuildSearchRequest(settings.BaseUrl, artistNames.FirstOrDefault(), album, settings.Sources))
+        public ExtraDLIndexerRequest(IExtraDLSearchSettings settings, string sources, List<string> artistNames, string album, int minSeconds = 0, int maxSeconds = 0)
+            : base(ExtraDLProxy.BuildSearchRequest(settings.BaseUrl, artistNames.FirstOrDefault(), album, sources))
         {
             ArtistNames = artistNames;
             Album = album;
@@ -26,11 +26,13 @@ namespace NzbDrone.Core.Indexers.ExtraDL
 
     public class ExtraDLRequestGenerator : IIndexerRequestGenerator
     {
-        private readonly ExtraDLIndexerSettings _settings;
+        private readonly IExtraDLSearchSettings _settings;
+        private readonly string _sources;
 
-        public ExtraDLRequestGenerator(ExtraDLIndexerSettings settings)
+        public ExtraDLRequestGenerator(IExtraDLSearchSettings settings, string sources)
         {
             _settings = settings;
+            _sources = sources;
         }
 
         // Neither site has a feed Lidarr could follow
@@ -48,6 +50,7 @@ namespace NzbDrone.Core.Indexers.ExtraDL
                 .ToList();
 
             return Single(new ExtraDLIndexerRequest(_settings,
+                _sources,
                 NameMatch.ArtistNames(searchCriteria.Artist),
                 searchCriteria.AlbumTitle,
                 durations.MinOrDefault(),
@@ -56,7 +59,7 @@ namespace NzbDrone.Core.Indexers.ExtraDL
 
         public IndexerPageableRequestChain GetSearchRequests(ArtistSearchCriteria searchCriteria)
         {
-            return Single(new ExtraDLIndexerRequest(_settings, NameMatch.ArtistNames(searchCriteria.Artist), null));
+            return Single(new ExtraDLIndexerRequest(_settings, _sources, NameMatch.ArtistNames(searchCriteria.Artist), null));
         }
 
         private static IndexerPageableRequestChain Single(IndexerRequest request)

@@ -124,9 +124,11 @@ downloaded come first. Recordings the Archive only allows to be streamed (Gratef
 are skipped. Audius gives no year, because its dates are when an album was uploaded there.
 
 - `install-somedl.sh` installs and starts it as `extradl.service`; the compose file has an `extradl` service.
-- In Lidarr add *Indexer → Extra sources (extradl)* with URL `http://<somedl-host>:5050` (tick the sites you
-  want), *Download Client → Extra sources (extradl)* with host `<somedl-host>`, port `5050`, and tick **ExtraDL**
-  in the delay profile.
+- In Lidarr add one indexer per site you want: *Bandcamp*, *SoundCloud*, *Jamendo*, *Internet Archive* and
+  *Audius (extradl)*, each with URL `http://<somedl-host>:5050`, so every site has its own priority, switch and
+  failure status. One *Download Client → Extra sources (extradl)* with host `<somedl-host>`, port `5050` serves
+  them all; tick **ExtraDL** in the delay profile. *Extra sources, combined (extradl)* still searches several
+  sites from one indexer, for setups made before the separate ones existed.
 - The same rules as the SomeDL indexer: title and artist must match for 80% (the artist's MusicBrainz aliases
   count, so Osees finds its Thee Oh Sees albums), and the length must fit the album. User playlists and fan
   uploads are skipped. Pick the sites per indexer.
