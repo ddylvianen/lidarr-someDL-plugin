@@ -86,7 +86,8 @@ and newer) and Lidarr imports them itself. Log: `journalctl -u somedl-mover`.
    `lidarr/plugins/ddylvianen/Lidarr.Plugin.SomeDL/` and restart Lidarr.
    Lidarr runs plugin installs and updates only when no other task runs, which can take very long with a
    large library. `deploy/update-plugin.sh` (run as root where Lidarr runs) installs the newest release
-   directly and restarts Lidarr; `--check` only reports whether there is one.
+   directly and restarts Lidarr: of this plugin, of any plugin by `owner/repo` (`TypNull/Tubifarry`), or of
+   all installed plugins with `--all`; `--check` only reports what would be updated.
 3. **Download client.** *Settings → Download Clients → + → SomeDL*: host `somedl`, port `5000`.
 4. **Indexer.** *Settings → Indexers → + → SomeDL*: URL `http://somedl:5000`.
 5. **Delay profile.** *Settings → Profiles → Delay Profiles*: tick **SomeDL**. New protocols start disabled,

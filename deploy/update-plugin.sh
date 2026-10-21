@@ -1,15 +1,28 @@
 #!/bin/sh
-# Updates the plugin without Lidarr's task queue, where plugin installs wait until no other task runs
-# (which never happens while Lidarr refreshes a large library). Run as root in the Lidarr LXC/VM:
+# Updates Lidarr plugins without Lidarr's task queue, where plugin installs wait until no other task
+# runs (which never happens while Lidarr refreshes a large library). Run as root where Lidarr runs:
 #
-#   sh update-plugin.sh            install the newest release if it is not installed yet, restart Lidarr
-#   sh update-plugin.sh --check    only say whether there is a newer release
+#   sh update-plugin.sh                     this plugin (ddylvianen/lidarr-someDL-plugin)
+#   sh update-plugin.sh TypNull/Tubifarry   any plugin, by its GitHub owner/repo
+#   sh update-plugin.sh --all               every installed plugin (Lidarr keeps them in plugins/<owner>/<repo>)
+#   add --check to only report what would be updated
 #
+# Takes the newest release that is not a pre-release (or the newest at all when a repo only has those, as
+# this plugin does), installs it where Lidarr's own installer would, and restarts Lidarr once at the end.
 # Lidarr's data folder is found by its config.xml; set LIDARR_DATA=/path to point at it yourself.
 set -eu
 
-REPO=ddylvianen/lidarr-someDL-plugin
-CHECK_ONLY=${1:-}
+CHECK=""
+TARGETS=""
+for arg in "$@"; do
+    case "$arg" in
+        --check) CHECK=1 ;;
+        --all) TARGETS="--all" ;;
+        */*) TARGETS="$TARGETS $arg" ;;
+        *) echo "Unknown argument: $arg"; exit 1 ;;
+    esac
+done
+[ -n "$TARGETS" ] || TARGETS="ddylvianen/lidarr-someDL-plugin"
 
 DATA=${LIDARR_DATA:-}
 if [ -z "$DATA" ]; then
@@ -22,46 +35,79 @@ if [ -z "$DATA" ]; then
 fi
 [ -f "$DATA/config.xml" ] || { echo "Lidarr's config.xml not found; set LIDARR_DATA=/path/to/it"; exit 1; }
 
-# Where Lidarr's own plugin install puts it, so both ways of installing stay interchangeable
-TARGET="$DATA/plugins/ddylvianen/lidarr-someDL-plugin"
-if [ -f "$TARGET/.release" ]; then
-    INSTALLED=$(cat "$TARGET/.release")
-elif [ -f "$TARGET/Lidarr.Plugin.SomeDL.dll" ]; then
-    INSTALLED="installed by Lidarr (its version shows under System > Plugins)"
-else
-    INSTALLED="not installed"
+if [ "$TARGETS" = "--all" ]; then
+    TARGETS=$(cd "$DATA/plugins" 2>/dev/null && for d in */*/; do [ -d "$d" ] && printf '%s ' "${d%/}"; done)
+    [ -n "$TARGETS" ] || { echo "No plugins installed in $DATA/plugins"; exit 0; }
 fi
 
-# Newest release, pre-releases included (that is how the workflow publishes them)
-RELEASES=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=5")
-TAG=$(printf '%s' "$RELEASES" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
-ASSET=$(printf '%s' "$RELEASES" | grep -o '"browser_download_url": *"[^"]*net8\.0\.zip"' | head -1 | sed 's/.*"\(https[^"]*\)"$/\1/')
-[ -n "$TAG" ] && [ -n "$ASSET" ] || { echo "Could not find a release on GitHub"; exit 1; }
-
-echo "Installed: $INSTALLED, newest: $TAG"
-if [ "$INSTALLED" = "$TAG" ]; then
-    echo "Up to date."
-    exit 0
-fi
-[ "$CHECK_ONLY" = "--check" ] && exit 0
-
+for tool in unzip python3; do
+    command -v $tool >/dev/null || { apt-get update -qq && apt-get install -y -qq $tool >/dev/null; }
+done
+OWNER_IDS=$(stat -c '%u:%g' "$DATA/config.xml")
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
-curl -fsSL "$ASSET" -o "$WORK/plugin.zip"
-command -v unzip >/dev/null || { apt-get update -qq && apt-get install -y -qq unzip >/dev/null; }
-unzip -q -o "$WORK/plugin.zip" -d "$WORK/plugin"
-[ -f "$WORK/plugin/Lidarr.Plugin.SomeDL.dll" ] || { echo "The release zip has no plugin in it"; exit 1; }
+CHANGED=0
 
-OWNER=$(stat -c '%u:%g' "$DATA/config.xml")
-mkdir -p "$TARGET"
-cp "$WORK/plugin/"* "$TARGET/"
-echo "$TAG" > "$TARGET/.release"
-chown -R "$OWNER" "$DATA/plugins"
-echo "Installed $TAG in $TARGET"
+update() {
+    repo=$1
+    target="$DATA/plugins/$repo"
 
-if systemctl list-unit-files 2>/dev/null | grep -q '^lidarr\.service'; then
-    systemctl restart lidarr
-    echo "Lidarr restarted."
-else
-    echo "Restart Lidarr yourself to load it."
+    if [ -f "$target/.release" ]; then
+        installed=$(cat "$target/.release")
+    elif ls "$target"/Lidarr.Plugin.*.dll >/dev/null 2>&1; then
+        installed="installed by Lidarr (its version shows under System > Plugins)"
+    else
+        installed="not installed"
+    fi
+
+    if ! curl -fsSL "https://api.github.com/repos/$repo/releases?per_page=20" -o "$WORK/releases.json"; then
+        echo "$repo: could not read its releases on GitHub"; return 0
+    fi
+    # Newest release with a net8.0 plugin zip, stable ones first
+    python3 - "$WORK/releases.json" > "$WORK/pick" <<'PY'
+import json, sys
+releases = [r for r in json.load(open(sys.argv[1])) if not r.get("draft")]
+def asset(r):
+    return next((a["browser_download_url"] for a in r.get("assets", []) if a["name"].endswith(".zip") and "net8" in a["name"]), None)
+usable = [r for r in releases if asset(r)]
+stable = [r for r in usable if not r.get("prerelease")]
+pick = (stable or usable or [None])[0]
+if pick:
+    print(pick["tag_name"], asset(pick))
+PY
+    tag=""; url=""
+    read -r tag url < "$WORK/pick" || true
+    if [ -z "$tag" ]; then
+        echo "$repo: no release with a plugin zip found"; return 0
+    fi
+
+    echo "$repo: installed: $installed, newest: $tag"
+    [ "$installed" = "$tag" ] && return 0
+    [ -n "$CHECK" ] && return 0
+
+    rm -rf "$WORK/plugin"
+    curl -fsSL "$url" -o "$WORK/plugin.zip"
+    unzip -q -o "$WORK/plugin.zip" -d "$WORK/plugin"
+    if ! ls "$WORK/plugin"/Lidarr.Plugin.*.dll >/dev/null 2>&1; then
+        echo "$repo: the release zip has no Lidarr plugin in it, skipped"; return 0
+    fi
+    mkdir -p "$target"
+    cp -r "$WORK/plugin/." "$target/"
+    echo "$tag" > "$target/.release"
+    chown -R "$OWNER_IDS" "$DATA/plugins"
+    echo "$repo: installed $tag"
+    CHANGED=1
+}
+
+for repo in $TARGETS; do
+    update "$repo"
+done
+
+if [ "$CHANGED" = 1 ]; then
+    if systemctl list-unit-files 2>/dev/null | grep -q '^lidarr\.service'; then
+        systemctl restart lidarr
+        echo "Lidarr restarted."
+    else
+        echo "Restart Lidarr yourself to load the update(s)."
+    fi
 fi
