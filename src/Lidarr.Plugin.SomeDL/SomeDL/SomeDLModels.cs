@@ -41,9 +41,12 @@ namespace NzbDrone.Plugin.SomeDL
         [JsonProperty("artists")]
         public List<SomeDLArtist> Artists { get; set; } = new ();
 
-        // Not in search hits; filled in when the hit was built from an album page, which has it
+        // Not in search hits; filled in when the hit was built from an album page, which has them
         [JsonProperty("duration_seconds")]
         public int? DurationSeconds { get; set; }
+
+        [JsonProperty("trackCount")]
+        public int? TrackCount { get; set; }
     }
 
     public class SomeDLSongSearchResponse
@@ -95,6 +98,9 @@ namespace NzbDrone.Plugin.SomeDL
 
         [JsonProperty("duration_seconds")]
         public int? DurationSeconds { get; set; }
+
+        [JsonProperty("trackCount")]
+        public int? TrackCount { get; set; }
 
         [JsonProperty("artists")]
         public List<SomeDLArtist> Artists { get; set; } = new ();

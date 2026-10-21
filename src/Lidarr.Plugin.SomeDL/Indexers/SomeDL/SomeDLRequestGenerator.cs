@@ -12,7 +12,7 @@ namespace NzbDrone.Core.Indexers.SomeDL
     /// </summary>
     public class SomeDLIndexerRequest : IndexerRequest
     {
-        public SomeDLIndexerRequest(string baseUrl, List<string> artistNames, string album, int minSeconds = 0, int maxSeconds = 0)
+        public SomeDLIndexerRequest(string baseUrl, List<string> artistNames, string album, int minSeconds = 0, int maxSeconds = 0, HashSet<int> trackCounts = null)
             : base(SomeDLProxy.BuildSearchRequest(baseUrl, album == null ? artistNames.FirstOrDefault() : $"{artistNames.FirstOrDefault()} {album}"))
         {
             ArtistNames = artistNames;
@@ -20,6 +20,7 @@ namespace NzbDrone.Core.Indexers.SomeDL
             Album = album;
             MinSeconds = minSeconds;
             MaxSeconds = maxSeconds;
+            TrackCounts = trackCounts ?? new HashSet<int>();
         }
 
         public string Artist { get; }
@@ -29,6 +30,9 @@ namespace NzbDrone.Core.Indexers.SomeDL
         // Shortest and longest wanted release of the album on MusicBrainz; 0 when unknown
         public int MinSeconds { get; }
         public int MaxSeconds { get; }
+
+        // Track counts of those releases; a hit with another count would be refused on import
+        public HashSet<int> TrackCounts { get; }
     }
 
     public class SomeDLRequestGenerator : IIndexerRequestGenerator
@@ -62,7 +66,8 @@ namespace NzbDrone.Core.Indexers.SomeDL
                 NameMatch.ArtistNames(searchCriteria.Artist),
                 searchCriteria.AlbumTitle,
                 durations.MinOrDefault(),
-                durations.MaxOrDefault()));
+                durations.MaxOrDefault(),
+                NameMatch.WantedTrackCounts(searchCriteria.Albums)));
         }
 
         public IndexerPageableRequestChain GetSearchRequests(ArtistSearchCriteria searchCriteria)

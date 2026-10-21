@@ -97,6 +97,32 @@ namespace NzbDrone.Plugin.SomeDL
             return seconds >= minSeconds * 0.6 && seconds <= maxSeconds * 1.8;
         }
 
+        // Strict, unlike the length: Lidarr rejects a new download with even one track more or less than
+        // the release it matches ("Has missing tracks" / "Has unmatched tracks"). Unknown counts pass.
+        public static bool TrackCountFits(int? trackCount, ICollection<int> wanted)
+        {
+            return trackCount is null or <= 0 || wanted == null || wanted.Count == 0 || wanted.Contains(trackCount.Value);
+        }
+
+        // Track counts of the releases Lidarr may match a download against: the monitored release, or
+        // all of them when the album allows any
+        public static HashSet<int> WantedTrackCounts(IEnumerable<Album> albums)
+        {
+            var counts = new HashSet<int>();
+            foreach (var album in albums)
+            {
+                foreach (var release in album.AlbumReleases.Value)
+                {
+                    if ((release.Monitored || album.AnyReleaseOk) && release.TrackCount > 0)
+                    {
+                        counts.Add(release.TrackCount);
+                    }
+                }
+            }
+
+            return counts;
+        }
+
         // Lowercase letters and digits only, accents folded and a leading "the" dropped, so
         // "The Beatles", "Beatles" and "Beyoncé"/"Beyonce" compare equal
         public static string Normalize(string name)

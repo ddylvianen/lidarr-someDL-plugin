@@ -65,13 +65,15 @@ namespace NzbDrone.Core.Indexers.ExtraDL
             {
                 var seconds = hit.DurationSeconds ?? 0;
                 var year = hit.Year;
-                if (seconds <= 0)
+                var trackCount = hit.TrackCount;
+                if (seconds <= 0 || (trackCount == null && request?.TrackCounts.Count > 0))
                 {
                     try
                     {
                         var details = _proxy.GetDetails(_settings.BaseUrl, hit.Url);
-                        seconds = details?.DurationSeconds ?? 0;
+                        seconds = seconds > 0 ? seconds : details?.DurationSeconds ?? 0;
                         year ??= details?.Year;
+                        trackCount ??= details?.TrackCount;
                     }
                     catch (Exception ex)
                     {
@@ -82,6 +84,12 @@ namespace NzbDrone.Core.Indexers.ExtraDL
                 if (request != null && !NameMatch.LengthFits(seconds, request.MinSeconds, request.MaxSeconds))
                 {
                     _logger.Debug("extradl: skipping {0} '{1}', {2}s does not fit the album's {3}-{4}s", hit.Source, hit.Title, seconds, request.MinSeconds, request.MaxSeconds);
+                    continue;
+                }
+
+                if (request != null && !NameMatch.TrackCountFits(trackCount, request.TrackCounts))
+                {
+                    _logger.Debug("extradl: skipping {0} '{1}', {2} tracks where the wanted release(s) have {3}", hit.Source, hit.Title, trackCount, string.Join("/", request.TrackCounts));
                     continue;
                 }
 

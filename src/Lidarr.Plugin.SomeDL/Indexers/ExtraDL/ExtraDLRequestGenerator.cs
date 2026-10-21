@@ -9,19 +9,21 @@ namespace NzbDrone.Core.Indexers.ExtraDL
 {
     public class ExtraDLIndexerRequest : IndexerRequest
     {
-        public ExtraDLIndexerRequest(IExtraDLSearchSettings settings, string sources, List<string> artistNames, string album, int minSeconds = 0, int maxSeconds = 0)
+        public ExtraDLIndexerRequest(IExtraDLSearchSettings settings, string sources, List<string> artistNames, string album, int minSeconds = 0, int maxSeconds = 0, HashSet<int> trackCounts = null)
             : base(ExtraDLProxy.BuildSearchRequest(settings.BaseUrl, artistNames.FirstOrDefault(), album, sources))
         {
             ArtistNames = artistNames;
             Album = album;
             MinSeconds = minSeconds;
             MaxSeconds = maxSeconds;
+            TrackCounts = trackCounts ?? new HashSet<int>();
         }
 
         public List<string> ArtistNames { get; }
         public string Album { get; }
         public int MinSeconds { get; }
         public int MaxSeconds { get; }
+        public HashSet<int> TrackCounts { get; }
     }
 
     public class ExtraDLRequestGenerator : IIndexerRequestGenerator
@@ -54,7 +56,8 @@ namespace NzbDrone.Core.Indexers.ExtraDL
                 NameMatch.ArtistNames(searchCriteria.Artist),
                 searchCriteria.AlbumTitle,
                 durations.MinOrDefault(),
-                durations.MaxOrDefault()));
+                durations.MaxOrDefault(),
+                NameMatch.WantedTrackCounts(searchCriteria.Albums)));
         }
 
         public IndexerPageableRequestChain GetSearchRequests(ArtistSearchCriteria searchCriteria)

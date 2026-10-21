@@ -12,7 +12,8 @@ with Tubifarry's Deezer metadata, albums that are not on MusicBrainz.
 
 1. **Search.** Lidarr asks for an album. The plugin searches YouTube Music albums through SomeDL, drops hits by
    other artists, looks up each remaining hit's length, and drops lengths that cannot be the album (a single or
-   intro that shares the album's name). Every remaining hit becomes a release such as
+   intro that shares the album's name) or track counts that no wanted MusicBrainz release has (Lidarr refuses
+   to import a download with a track more or less: "Has missing tracks"). Every remaining hit becomes a release such as
    `Artist - Album (2024) [MP3 V0 VBR] [WEB]`.
 2. **Grab.** The client sends the album's YouTube Music playlist to SomeDL (`/yt-download`, the same call as
    SomeDL's own WebUI album button). SomeDL queues one item per track. The plugin keeps the mapping in
@@ -130,7 +131,8 @@ are skipped. Audius gives no year, because its dates are when an album was uploa
   them all; tick **ExtraDL** in the delay profile. *Extra sources, combined (extradl)* still searches several
   sites from one indexer, for setups made before the separate ones existed.
 - The same rules as the SomeDL indexer: title and artist must match for 80% (the artist's MusicBrainz aliases
-  count, so Osees finds its Thee Oh Sees albums), and the length must fit the album. User playlists and fan
+  count, so Osees finds its Thee Oh Sees albums), the length must fit the album and the track count must be
+  that of a wanted release. User playlists and fan
   uploads are skipped. Pick the sites per indexer.
 - Audiomack is not included: yt-dlp's Audiomack support is broken at the moment.
 

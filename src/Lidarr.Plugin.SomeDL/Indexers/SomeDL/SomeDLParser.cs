@@ -62,11 +62,22 @@ namespace NzbDrone.Core.Indexers.SomeDL
 
             foreach (var hit in candidates.Take(_settings.MaxAlbumsPerSearch))
             {
-                var seconds = hit.DurationSeconds ?? LookUpSeconds(hit);
+                if (hit.DurationSeconds == null || (hit.TrackCount == null && request?.TrackCounts.Count > 0))
+                {
+                    LookUp(hit);
+                }
+
+                var seconds = hit.DurationSeconds ?? 0;
 
                 if (request != null && !LengthFits(seconds, request))
                 {
                     _logger.Debug("SomeDL: skipping '{0}', {1}s does not fit the album's {2}-{3}s", hit.Title, seconds, request.MinSeconds, request.MaxSeconds);
+                    continue;
+                }
+
+                if (request != null && !NameMatch.TrackCountFits(hit.TrackCount, request.TrackCounts))
+                {
+                    _logger.Debug("SomeDL: skipping '{0}', {1} tracks where the wanted release(s) have {2}", hit.Title, hit.TrackCount, string.Join("/", request.TrackCounts));
                     continue;
                 }
 
@@ -106,7 +117,8 @@ namespace NzbDrone.Core.Indexers.SomeDL
                         PlaylistId = page.AudioPlaylistId,
                         BrowseId = albumId,
                         Artists = page.Artists,
-                        DurationSeconds = page.DurationSeconds
+                        DurationSeconds = page.DurationSeconds,
+                        TrackCount = page.TrackCount
                     });
                 }
             }
@@ -124,17 +136,19 @@ namespace NzbDrone.Core.Indexers.SomeDL
             return NameMatch.Matches(wanted, found, _settings.MinimumNameMatch);
         }
 
-        // Search hits carry no length, and Lidarr's quality size limits need one. 0 when unknown.
-        private int LookUpSeconds(SomeDLAlbumHit hit)
+        // Search hits carry no length or track count; Lidarr's quality size limits need the one, the
+        // track count check the other. Both stay null when the lookup fails.
+        private void LookUp(SomeDLAlbumHit hit)
         {
             try
             {
-                return _proxy.GetPlaylist(_settings.BaseUrl, hit.PlaylistId)?.DurationSeconds ?? 0;
+                var playlist = _proxy.GetPlaylist(_settings.BaseUrl, hit.PlaylistId);
+                hit.DurationSeconds ??= playlist?.DurationSeconds;
+                hit.TrackCount ??= playlist?.TrackCount;
             }
             catch (Exception ex)
             {
                 _logger.Debug(ex, "SomeDL could not look up the length of {0}", hit.PlaylistId);
-                return 0;
             }
         }
 
