@@ -113,7 +113,7 @@ track titles and the cover.
 | Site | What | Lidarr quality |
 |---|---|---|
 | Bandcamp | its free stream | MP3-128 |
-| SoundCloud | albums and singles | AAC-VBR (about 160 kbps) |
+| SoundCloud | albums and singles; Go+ releases (30-second previews only) are skipped | AAC-VBR (about 160 kbps) |
 | Jamendo | free Creative Commons albums | FLAC |
 | Internet Archive | live recordings (Live Music Archive), public domain recordings; files fetched directly | FLAC, FLAC 24bit or MP3-VBR |
 | Audius | albums of verified artists only | MP3-320 |

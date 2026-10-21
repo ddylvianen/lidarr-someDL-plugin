@@ -113,6 +113,13 @@ def soundcloud_client_id(refresh=False):
     return SOUNDCLOUD_CLIENT["id"]
 
 
+def soundcloud_preview_only(hit):
+    """SoundCloud Go+ tracks (policy SNIP) only play a 30-second preview without a subscription, and BLOCK
+    ones not at all; an album with any of them would come out incomplete."""
+    tracks = hit.get("tracks") if "tracks" in hit else [hit]
+    return any((t or {}).get("policy") in ("SNIP", "BLOCK") for t in tracks)
+
+
 def search_soundcloud(artist, album):
     query = f"{artist} {album or ''}".strip()
     results = []
@@ -129,6 +136,9 @@ def search_soundcloud(artist, album):
         for hit in data.get("collection", []):
             if kind == "albums" and hit.get("set_type") not in ("album", "ep", "single", "compilation"):
                 continue  # user playlists are not releases
+            if soundcloud_preview_only(hit):
+                log(f"search soundcloud: skipped {hit.get('title')!r}: only 30-second previews (SoundCloud Go+)")
+                continue
             # not created_at: that is the upload, often years after the release, and Lidarr rejects a wrong year
             date = hit.get("release_date") or hit.get("display_date") or ""
             results.append({
@@ -408,7 +418,8 @@ class Jobs:
                 self.update(job["id"], done=done)
 
         options = {
-            "format": "bestaudio/best",
+            # never SoundCloud's 30-second previews of Go+ tracks: rather no format, so the job fails
+            "format": "bestaudio[format_id!*=preview]/best[format_id!*=preview]",
             "outtmpl": {"default": os.path.join(folder, "%(playlist_index&{0:02d}|01)s - %(track,title)s.%(ext)s"),
                         "pl_thumbnail": os.path.join(folder, "cover.%(ext)s")},
             "writethumbnail": True,
@@ -424,11 +435,17 @@ class Jobs:
             info = y.extract_info(job["url"], download=False)
             entries = [e for e in (info.get("entries") or [info]) if e]
             self.update(job["id"], total=len(entries))
-            y.process_ie_result(info, download=True)
+            try:
+                y.process_ie_result(info, download=True)
+            except yt_dlp.utils.DownloadError as e:
+                if "Requested format is not available" in str(e):
+                    raise RuntimeError("the site only offers previews of (some of) these tracks") from None
+                raise
 
         files = sorted(n for n in os.listdir(folder) if os.path.splitext(n)[1].lower() in AUDIO_EXTENSIONS)
         if not files:
             raise RuntimeError("yt-dlp downloaded nothing")
+        check_not_previews(folder, files, entries)
         for index, name in enumerate(files, 1):
             entry = entries[index - 1] if index <= len(entries) else {}
             tag(os.path.join(folder, name), job, entry, index, len(files))
@@ -464,6 +481,25 @@ class Jobs:
         except OSError:
             pass
         self.update(job["id"], state="completed", done=len(files))
+
+
+def check_not_previews(folder, files, entries):
+    """Last line of defence against previews: tracks the site lists as full length that came out as
+    30-second clips. Failing the job makes Lidarr blocklist the release and look for another."""
+    clipped, short = [], 0
+    for index, name in enumerate(files):
+        info = mutagen.File(os.path.join(folder, name))
+        seconds = getattr(getattr(info, "info", None), "length", 0) or 0
+        listed = (entries[index].get("duration") if index < len(entries) else None) or 0
+        if 0 < seconds <= 31:
+            short += 1
+            if listed > 45:
+                clipped.append(name)
+    # playlists do not always list durations; a whole album of 30-second tracks is previews too
+    if not clipped and len(files) > 2 and short == len(files):
+        clipped = files
+    if clipped:
+        raise RuntimeError(f"{len(clipped)} of {len(files)} track(s) are 30-second previews, not the full songs")
 
 
 def safe_name(text):
