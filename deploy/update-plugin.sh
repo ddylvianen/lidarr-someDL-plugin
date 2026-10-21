@@ -24,7 +24,13 @@ fi
 
 # Where Lidarr's own plugin install puts it, so both ways of installing stay interchangeable
 TARGET="$DATA/plugins/ddylvianen/lidarr-someDL-plugin"
-INSTALLED=$(cat "$TARGET/.release" 2>/dev/null || echo none)
+if [ -f "$TARGET/.release" ]; then
+    INSTALLED=$(cat "$TARGET/.release")
+elif [ -f "$TARGET/Lidarr.Plugin.SomeDL.dll" ]; then
+    INSTALLED="installed by Lidarr (its version shows under System > Plugins)"
+else
+    INSTALLED="not installed"
+fi
 
 # Newest release, pre-releases included (that is how the workflow publishes them)
 RELEASES=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=5")
