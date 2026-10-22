@@ -25,15 +25,18 @@ namespace NzbDrone.Core.Download.Clients.SomeDL
     /// </summary>
     public class SomeDLClient : DownloadClientBase<SomeDLClientSettings>
     {
-        // How long the unfinished tracks of a download may be absent from SomeDL entirely before the
-        // download is failed. Covers the moment between SomeDL taking a track off its queue and
-        // listing it as active.
-        private static readonly TimeSpan MissingGracePeriod = TimeSpan.FromMinutes(2);
-
         // Left in every album folder this client downloads, so tools/somedl_mover.py (which moves what
         // was downloaded through SomeDL's own WebUI into the library) leaves Lidarr's downloads alone.
         // Lidarr deletes the folder, marker included, after importing.
         public const string MarkerFileName = ".lidarr-somedl";
+
+        // Times an album with failed tracks is queued again before Lidarr gets what there is
+        private const int MaxRetries = 2;
+
+        // How long the unfinished tracks of a download may be absent from SomeDL entirely before the
+        // download is failed. Covers the moment between SomeDL taking a track off its queue and
+        // listing it as active.
+        private static readonly TimeSpan MissingGracePeriod = TimeSpan.FromMinutes(2);
 
         private readonly ISomeDLProxy _proxy;
         private readonly ISomeDLDownloadStore _store;
@@ -76,7 +79,8 @@ namespace NzbDrone.Core.Download.Clients.SomeDL
                 Title = release.Title,
                 Size = release.Size,
                 AddedUtc = DateTime.UtcNow,
-                SomeDLIds = ids
+                SomeDLIds = ids,
+                Url = release.DownloadUrl
             });
 
             _logger.Info("SomeDL queued {0} tracks for {1}", ids.Count, release.Title);
@@ -180,6 +184,14 @@ namespace NzbDrone.Core.Download.Clients.SomeDL
                 return item;
             }
 
+            if (failed > 0 && !lost && Retry(download, failed))
+            {
+                item.Status = DownloadItemStatus.Downloading;
+                item.RemainingSize = total == 0 ? 0 : download.Size * failed / total;
+                item.Message = $"{failed} of {total} tracks failed, trying them again ({download.Retries}/{MaxRetries})";
+                return item;
+            }
+
             if (succeeded == 0)
             {
                 item.Status = DownloadItemStatus.Failed;
@@ -227,6 +239,45 @@ namespace NzbDrone.Core.Download.Clients.SomeDL
             }
 
             return item;
+        }
+
+        // Queues the album again; SomeDL downloads only the tracks it does not have yet. Lidarr refuses
+        // an album with missing tracks, so a second chance beats importing nothing.
+        private bool Retry(SomeDLDownload download, int failed)
+        {
+            if (download.Retries >= MaxRetries || string.IsNullOrWhiteSpace(download.Url))
+            {
+                return false;
+            }
+
+            List<string> ids;
+            try
+            {
+                ids = _proxy.DownloadAlbum(BaseUrl, download.Url);
+            }
+            catch (Exception ex)
+            {
+                _logger.Warn(ex, "SomeDL: could not queue {0} again", download.Title);
+                return false;
+            }
+
+            if (ids.Count == 0)
+            {
+                return false;
+            }
+
+            download.OwnFiles.AddRange(download.Finished.Values
+                .Where(f => f.Count > 1 && f[0] == SomeDLFinishState.Success && !string.IsNullOrWhiteSpace(f[1]))
+                .Select(f => f[1])
+                .Except(download.OwnFiles));
+            download.SomeDLIds = ids;
+            download.Finished = new Dictionary<string, List<string>>();
+            download.MissingSinceUtc = null;
+            download.Retries++;
+            _store.Update(download);
+
+            _logger.Info("SomeDL: {0} of {1} failed, queued the album again (attempt {2} of {3})", failed, download.Title, download.Retries, MaxRetries);
+            return true;
         }
 
         private bool FilesGone(SomeDLDownload download, OsPath folder)
@@ -316,9 +367,15 @@ namespace NzbDrone.Core.Download.Clients.SomeDL
         {
             var folders = new HashSet<string>();
 
-            foreach (var finished in download.Finished.Values.Where(f => f.Count > 1 && f[0] == SomeDLFinishState.Success && !string.IsNullOrWhiteSpace(f[1])))
+            var paths = download.Finished.Values
+                .Where(f => f.Count > 1 && f[0] == SomeDLFinishState.Success && !string.IsNullOrWhiteSpace(f[1]))
+                .Select(f => f[1])
+                .Concat(download.OwnFiles ?? new List<string>())
+                .Distinct();
+
+            foreach (var path in paths)
             {
-                var local = _remotePathMappingService.RemapRemoteToLocal(Settings.Host, new OsPath(finished[1]));
+                var local = _remotePathMappingService.RemapRemoteToLocal(Settings.Host, new OsPath(path));
 
                 if (_diskProvider.FileExists(local.FullPath))
                 {

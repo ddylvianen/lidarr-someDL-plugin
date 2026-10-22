@@ -25,6 +25,15 @@ namespace NzbDrone.Core.Download.Clients.SomeDL
         // Set while none of the unfinished tracks can be found in SomeDL at all (it restarted, or
         // its queue was cleared), so the download can be failed instead of waiting forever
         public DateTime? MissingSinceUtc { get; set; }
+
+        // The YouTube Music playlist, to queue the album again when tracks failed (YouTube refuses
+        // yt-dlp now and then); SomeDL skips the tracks it already has
+        public string Url { get; set; }
+        public int Retries { get; set; }
+
+        // Files this download wrote in earlier attempts; a retry reports them as already downloaded,
+        // which says nothing about who wrote them, and removing the download must still delete them
+        public List<string> OwnFiles { get; set; } = new ();
     }
 
     public interface ISomeDLDownloadStore
