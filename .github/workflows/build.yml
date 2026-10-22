@@ -12,7 +12,7 @@ permissions:
 env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
   PLUGIN_NAME: Lidarr.Plugin.SomeDL
-  PLUGIN_VERSION: 0.7.0.0
+  PLUGIN_VERSION: 0.7.1.0
   # Lidarr refuses plugins built against a newer Lidarr.Core than itself, and reads this line from
   # the release notes to decide whether to offer an update
   MINIMUM_LIDARR_VERSION: 3.1.5.5066

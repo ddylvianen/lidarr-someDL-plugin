@@ -101,7 +101,10 @@ namespace NzbDrone.Core.Download.Clients.SomeDL
             foreach (var download in downloads)
             {
                 var item = ToItem(download, status, queued, ref config);
-                items.Add(item);
+                if (item != null)
+                {
+                    items.Add(item);
+                }
             }
 
             return items;
@@ -204,8 +207,19 @@ namespace NzbDrone.Core.Download.Clients.SomeDL
                 return item;
             }
 
+            var local = _remotePathMappingService.RemapRemoteToLocal(Settings.Host, folder);
+
+            // Two grabs of one album land in the same folder; importing the first moves the files of
+            // both. The second would then wait forever on a folder that is gone, so it is let go.
+            if (FilesGone(download, local))
+            {
+                _logger.Info("SomeDL: the files of {0} are gone from {1} (imported with another download of the same album?), no longer tracking it", download.Title, local);
+                _store.Remove(download.DownloadId);
+                return null;
+            }
+
             item.Status = DownloadItemStatus.Completed;
-            item.OutputPath = _remotePathMappingService.RemapRemoteToLocal(Settings.Host, folder);
+            item.OutputPath = local;
 
             if (failed > 0)
             {
@@ -213,6 +227,18 @@ namespace NzbDrone.Core.Download.Clients.SomeDL
             }
 
             return item;
+        }
+
+        private bool FilesGone(SomeDLDownload download, OsPath folder)
+        {
+            if (_diskProvider.FolderExists(folder.FullPath))
+            {
+                return false;
+            }
+
+            return !download.Finished.Values
+                .Where(f => f.Count > 1 && !string.IsNullOrWhiteSpace(f[1]))
+                .Any(f => _diskProvider.FileExists(_remotePathMappingService.RemapRemoteToLocal(Settings.Host, new OsPath(f[1])).FullPath));
         }
 
         /// <summary>
