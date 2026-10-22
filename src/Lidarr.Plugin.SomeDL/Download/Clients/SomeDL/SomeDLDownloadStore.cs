@@ -30,6 +30,7 @@ namespace NzbDrone.Core.Download.Clients.SomeDL
         // yt-dlp now and then); SomeDL skips the tracks it already has
         public string Url { get; set; }
         public int Retries { get; set; }
+        public DateTime? RetryAfterUtc { get; set; }
 
         // Files this download wrote in earlier attempts; a retry reports them as already downloaded,
         // which says nothing about who wrote them, and removing the download must still delete them

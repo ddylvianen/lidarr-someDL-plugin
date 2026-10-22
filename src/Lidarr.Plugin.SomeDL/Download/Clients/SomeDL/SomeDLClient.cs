@@ -33,6 +33,10 @@ namespace NzbDrone.Core.Download.Clients.SomeDL
         // Times an album with failed tracks is queued again before Lidarr gets what there is
         private const int MaxRetries = 2;
 
+        // Failed tracks are mostly YouTube refusing this IP for a while ("confirm you're not a bot"),
+        // so trying again at once would only fail again
+        private static readonly TimeSpan RetryDelay = TimeSpan.FromMinutes(45);
+
         // How long the unfinished tracks of a download may be absent from SomeDL entirely before the
         // download is failed. Covers the moment between SomeDL taking a track off its queue and
         // listing it as active.
@@ -184,12 +188,29 @@ namespace NzbDrone.Core.Download.Clients.SomeDL
                 return item;
             }
 
-            if (failed > 0 && !lost && Retry(download, failed))
+            if (failed > 0 && !lost && download.Retries < MaxRetries && !string.IsNullOrWhiteSpace(download.Url))
             {
                 item.Status = DownloadItemStatus.Downloading;
                 item.RemainingSize = total == 0 ? 0 : download.Size * failed / total;
-                item.Message = $"{failed} of {total} tracks failed, trying them again ({download.Retries}/{MaxRetries})";
-                return item;
+
+                if (download.RetryAfterUtc == null)
+                {
+                    download.RetryAfterUtc = DateTime.UtcNow + RetryDelay;
+                    _store.Update(download);
+                }
+
+                if (DateTime.UtcNow < download.RetryAfterUtc)
+                {
+                    item.RemainingTime = download.RetryAfterUtc - DateTime.UtcNow;
+                    item.Message = $"{failed} of {total} tracks failed in SomeDL; trying them again at {download.RetryAfterUtc.Value.ToLocalTime():HH:mm} ({download.Retries + 1}/{MaxRetries})";
+                    return item;
+                }
+
+                if (Retry(download, failed))
+                {
+                    item.Message = $"{failed} of {total} tracks failed, trying them again ({download.Retries}/{MaxRetries})";
+                    return item;
+                }
             }
 
             if (succeeded == 0)
@@ -245,11 +266,6 @@ namespace NzbDrone.Core.Download.Clients.SomeDL
         // an album with missing tracks, so a second chance beats importing nothing.
         private bool Retry(SomeDLDownload download, int failed)
         {
-            if (download.Retries >= MaxRetries || string.IsNullOrWhiteSpace(download.Url))
-            {
-                return false;
-            }
-
             List<string> ids;
             try
             {
@@ -273,6 +289,7 @@ namespace NzbDrone.Core.Download.Clients.SomeDL
             download.SomeDLIds = ids;
             download.Finished = new Dictionary<string, List<string>>();
             download.MissingSinceUtc = null;
+            download.RetryAfterUtc = null;
             download.Retries++;
             _store.Update(download);
 
