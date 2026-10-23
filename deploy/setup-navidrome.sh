@@ -14,7 +14,7 @@
 #             discord-rich-presence
 # NAVIDROME_PLUGINS=0 skips the plugins.
 #
-# mood-playlists needs an analyzer next to Navidrome (essentia-tensorflow, about 1.5 GB on disk). It is
+# mood-playlists needs an analyzer next to Navidrome (essentia-tensorflow, about 750 MB on disk). It is
 # installed as the mood-analyzer service on 127.0.0.1:8765, reading the same files Navidrome reads, at
 # low CPU and IO priority. MOOD_ANALYZER=0 skips it (and the plugin).
 set -eu
@@ -137,8 +137,8 @@ if [ "${NAVIDROME_PLUGINS:-1}" != 0 ] && [ "$MOOD" = yes ]; then
     if [ "$PY" -lt 309 ] || [ "$PY" -gt 314 ]; then
         echo "   skipped: essentia-tensorflow has no build for Python $(python3 -V | cut -d' ' -f2) (needs 3.9 to 3.14)"
         MOOD=failed
-    elif [ ! -x "$ANALYZER_DIR/bin/uvicorn" ] && [ "$FREE_MB" -lt 2500 ]; then
-        echo "   skipped: needs about 2.5 GB free on $(dirname "$ANALYZER_DIR"), there is ${FREE_MB} MB"
+    elif [ ! -x "$ANALYZER_DIR/bin/uvicorn" ] && [ "$FREE_MB" -lt 1200 ]; then
+        echo "   skipped: needs about 1.2 GB free on $(dirname "$ANALYZER_DIR"), there is ${FREE_MB} MB"
         echo "   grow the disk on the Proxmox host (pct resize <id> rootfs +4G) and run this again"
         MOOD=failed
     else
@@ -147,7 +147,7 @@ if [ "${NAVIDROME_PLUGINS:-1}" != 0 ] && [ "$MOOD" = yes ]; then
         [ -x "$ANALYZER_DIR/bin/python" ] || python3 -m venv "$ANALYZER_DIR" || ok=0
         if [ $ok = 1 ]; then
             echo "   installing essentia-tensorflow (about 300 MB download, takes a few minutes)"
-            "$ANALYZER_DIR/bin/pip" install --quiet --disable-pip-version-check -U \
+            "$ANALYZER_DIR/bin/pip" install --quiet --disable-pip-version-check --no-cache-dir -U \
                 "fastapi>=0.115" "uvicorn>=0.34" "essentia-tensorflow==$ESSENTIA" "mutagen>=1.47" "numpy>=2.0" || ok=0
         fi
         [ $ok = 1 ] && { curl -fsSL "https://raw.githubusercontent.com/craiglush/navidrome-mood-plugin/$ANALYZER_TAG/analyzer-service/app.py" \
