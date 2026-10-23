@@ -19,7 +19,10 @@
 set -eu
 
 ANALYZER_PORT=8765
-ANALYZER_TAG=v0.2.0   # the analyzer that goes with the mood-playlists plugin release installed below
+# mood-playlists v0.2.0 is refused by Navidrome 0.64; this repo carries a build of the unreleased fix
+# (deploy/navidrome-plugins/README.md), and the analyzer comes from that same commit
+MOOD_NDP_URL=https://raw.githubusercontent.com/ddylvianen/lidarr-someDL-plugin/main/deploy/navidrome-plugins/mood-playlists.ndp
+ANALYZER_SRC=https://raw.githubusercontent.com/WernerVdM97/navidrome-mood-plugin/7fd4862ea9f20a3b741f6c49cc4d74a71557d4a6/analyzer-service/app.py
 ANALYZER_DIR=/opt/mood-analyzer
 
 CONFIG=$(systemctl cat navidrome 2>/dev/null | sed -n 's/.*"-c" "\([^"]*\)".*/\1/p' | head -1)
@@ -42,13 +45,13 @@ esac
 MOOD=yes
 [ "${MOOD_ANALYZER:-1}" = 0 ] && MOOD=skip
 
-# repo  release-asset  saved-as  enable-right-away
+# repo (or a direct URL)  release-asset  saved-as  enable-right-away
 PLUGINS="
 navidrome/apple-music-plugin apple-music.ndp apple-music.ndp yes
 sunsetroute1/navidrome-coverartarchive-plugin coverartarchive.ndp coverartarchive.ndp yes
 J0R6IT0/navidrome-lyrics-plugin nd-lyrics.ndp nd-lyrics.ndp yes
 nenadjokic/navibeat-mixes $NAVIBEAT navibeat-mixes.ndp yes
-craiglush/navidrome-mood-plugin mood-playlists.ndp mood-playlists.ndp $MOOD
+$MOOD_NDP_URL mood-playlists.ndp mood-playlists.ndp $MOOD
 kgarner7/navidrome-listenbrainz-daily-playlist listenbrainz-daily-playlist.ndp listenbrainz-daily-playlist.ndp no
 "
 # Installed by earlier versions of this script, no longer wanted
@@ -111,9 +114,13 @@ if [ "${NAVIDROME_PLUGINS:-1}" != 0 ]; then
     echo "== plugins"
     echo "$PLUGINS" | while read -r repo asset target enable; do
         [ -n "$repo" ] && [ "$enable" != skip ] || continue
-        if curl -fsSL "https://github.com/$repo/releases/latest/download/$asset" -o "$DATA/plugins/$target.part"; then
+        case "$repo" in
+            https://*) url=$repo; from="the build in this repo" ;;
+            *) url="https://github.com/$repo/releases/latest/download/$asset"; from="$asset, latest release of $repo" ;;
+        esac
+        if curl -fsSL "$url" -o "$DATA/plugins/$target.part"; then
             mv "$DATA/plugins/$target.part" "$DATA/plugins/$target"
-            echo "   ${target%.ndp}: installed ($asset, latest release of $repo)"
+            echo "   ${target%.ndp}: installed ($from)"
         else
             rm -f "$DATA/plugins/$target.part"
             echo "   ${target%.ndp}: download FAILED ($repo)"
@@ -152,7 +159,7 @@ if [ "${NAVIDROME_PLUGINS:-1}" != 0 ] && [ "$MOOD" = yes ]; then
             "$ANALYZER_DIR/bin/pip" install --quiet --disable-pip-version-check --no-cache-dir -U \
                 "fastapi>=0.115" "uvicorn>=0.34" "essentia-tensorflow==$ESSENTIA" "mutagen>=1.47" "numpy>=2.0" || ok=0
         fi
-        [ $ok = 1 ] && { curl -fsSL "https://raw.githubusercontent.com/craiglush/navidrome-mood-plugin/$ANALYZER_TAG/analyzer-service/app.py" \
+        [ $ok = 1 ] && { curl -fsSL "$ANALYZER_SRC" \
             -o "$ANALYZER_DIR/app.py" || ok=0; }
         mkdir -p "$ANALYZER_DIR/models"
         for model in feature-extractors/discogs-effnet/discogs-effnet-bs64-1.pb \
