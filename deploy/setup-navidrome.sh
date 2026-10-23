@@ -18,7 +18,18 @@
 # mood-playlists needs an analyzer next to Navidrome (essentia-tensorflow, about 750 MB on disk). It is
 # installed as the mood-analyzer service on 127.0.0.1:8765, reading the same files Navidrome reads, at
 # low CPU and IO priority. MOOD_ANALYZER=0 skips it (and the plugin).
+#
+# Plugin updates, daily at 04:30 (navidrome-plugin-update.timer): ndpm (github.com/depau/ndpm) fetches new
+# releases of the plugins above, the plugins Navidrome switched off for the update are switched back on,
+# mood-playlists moves to the author's release once there is a fixed one, and the plugin watcher
+# (github.com/Tal0na/plugin-watcher-0navidrome) reports newer releases of any plugin nothing updates.
+# Give the watcher somewhere to send them, e.g. ntfy:
+#   NDP_WEBHOOK_URL=https://ntfy.sh/<your-topic> NDP_WEBHOOK_TYPE=ntfy sh setup-navidrome.sh /data
+# (discord, slack and generic work too). PLUGIN_UPDATES=0 skips all of this.
 set -eu
+
+NDPM_VERSION=v0.1.0
+WATCHER_SRC=https://raw.githubusercontent.com/Tal0na/plugin-watcher-0navidrome/4d971a5b38ce50b453a38157a8c15c45cb9b5829/ndp_watcher.py
 
 ANALYZER_PORT=8765
 # mood-playlists v0.2.0 is refused by Navidrome 0.64. Until the author releases something newer, this
@@ -121,6 +132,8 @@ EnableSharing    = true
 
 Plugins.Enabled = true
 Plugins.Folder  = "$DATA/plugins"
+# Picks up plugin files that ndpm replaces, without a restart
+Plugins.AutoReload = true
 TOML
 chown "$RUN_USER:" "$DATA/plugins"
 
@@ -243,6 +256,141 @@ UNIT
         MEM_MB=$(free -m | awk '/^Mem:/ {print $2}')
         [ "$MEM_MB" -ge 3000 ] || echo "   note: this LXC has ${MEM_MB} MB RAM; analysis wants about 1.5 GB of it while it runs"
     fi
+fi
+
+# --- plugin updates: ndpm, re-enabling, mood-playlists release switch, watcher ---------------------------
+if [ "${NAVIDROME_PLUGINS:-1}" != 0 ] && [ "${PLUGIN_UPDATES:-1}" != 0 ]; then
+    echo "== plugin updates"
+    case "$(uname -m)" in
+        x86_64) ARCH=amd64 ;;
+        aarch64|arm64) ARCH=arm64 ;;
+        armv7l|armv6l) ARCH=arm ;;
+        *) ARCH= ;;
+    esac
+    if [ -n "$ARCH" ] && curl -fsSL "https://github.com/depau/ndpm/releases/download/$NDPM_VERSION/ndpm-linux-$ARCH" -o /usr/local/bin/ndpm.part; then
+        mv /usr/local/bin/ndpm.part /usr/local/bin/ndpm
+        chmod 755 /usr/local/bin/ndpm
+        echo "   ndpm $NDPM_VERSION installed"
+    else
+        rm -f /usr/local/bin/ndpm.part
+        echo "   ndpm: no build for $(uname -m) or download FAILED; plugins are only updated by rerunning this script"
+    fi
+
+    # ndpm follows the GitHub releases of every plugin above; the mood-playlists build from this repo is
+    # left to the update script below until the author releases a fixed version
+    {
+        echo "plugins_dir: $DATA/plugins"
+        echo "sources:"
+        echo "$PLUGINS" | while read -r repo asset target enable; do
+            case "$repo" in ''|https://*) continue ;; esac
+            [ "$enable" = skip ] && continue
+            pre=false
+            case "$repo" in +*) pre=true; repo=${repo#+} ;; esac
+            echo "  - repo: $repo"
+            echo "    filename: $asset"
+            echo "    slug: ${target%.ndp}"
+            echo "    include_prereleases: $pre"
+        done
+    } > /etc/ndpm.yaml
+
+    apt-get install -y -qq python3 >/dev/null 2>&1 || true
+    mkdir -p /opt/ndp-watcher
+    curl -fsSL "$WATCHER_SRC" -o /opt/ndp-watcher/ndp_watcher.py || echo "   plugin watcher: download FAILED"
+    # A rerun keeps the webhook already set, unless a new one is given
+    python3 - "$DATA/plugins" "${NDP_WEBHOOK_URL:-}" "${NDP_WEBHOOK_TYPE:-}" <<'WATCHERCONFIG'
+import json, sys
+path = "/opt/ndp-watcher/config.json"
+try:
+    config = json.load(open(path))
+except (OSError, ValueError):
+    config = {"webhook_url": "", "webhook_type": "generic", "overrides": {}}
+config["plugins_folder"] = sys.argv[1]
+if sys.argv[2]:
+    config["webhook_url"] = sys.argv[2]
+if sys.argv[3]:
+    config["webhook_type"] = sys.argv[3]
+# its manifest names the author's repo, whose release is older than this build
+config["ignore"] = sorted(set(config.get("ignore", [])) | {"mood-playlists"})
+# its manifest points at navibeat.app instead of GitHub
+config.setdefault("overrides", {}).setdefault("navibeat-mixes", "nenadjokic/navibeat-mixes")
+json.dump(config, open(path, "w"), indent=2)
+print("   plugin watcher: notifications " + ("to " + config["webhook_type"] if config["webhook_url"] else "only in the log (no webhook set)"))
+WATCHERCONFIG
+    chown -R "$RUN_USER:" /opt/ndp-watcher
+
+    sed -e "s#@USER@#$RUN_USER#g" -e "s#@DATA@#$DATA#g" -e "s#@CONFIG@#$CONFIG#g" \
+        -e "s#@ANALYZER_DIR@#$ANALYZER_DIR#g" -e "s#@MOOD_REPO@#$MOOD_REPO#g" \
+        -e "s#@MOOD_BROKEN@#$MOOD_BROKEN_RELEASE#g" > /usr/local/bin/navidrome-plugin-update <<'UPDATE'
+#!/bin/sh
+# Daily plugin update for Navidrome, installed by setup-navidrome.sh. Run it by hand any time.
+set -u
+nd() { su -s /bin/sh @USER@ -c "cd '@DATA@' && navidrome -c '@CONFIG@' plugin $*"; }
+enabled() { nd list 2>/dev/null | awk 'NR > 1 { for (i = 2; i <= NF; i++) if ($i == "true") { print $1; break } }'; }
+
+# Navidrome switches a plugin off when its version changes, so remember which ones were on
+was_on=$(enabled)
+
+if [ -x /usr/local/bin/ndpm ]; then
+    su -s /bin/sh @USER@ -c "/usr/local/bin/ndpm --config /etc/ndpm.yaml --once" || echo "ndpm reported a problem"
+fi
+
+# mood-playlists: the build from lidarr-someDL-plugin until its author releases one Navidrome 0.64
+# accepts; then that release (and its analyzer), after which ndpm keeps it current
+tag=$(curl -fsSL "https://api.github.com/repos/@MOOD_REPO@/releases/latest" 2>/dev/null | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+if [ -n "$tag" ] && [ "$tag" != "@MOOD_BROKEN@" ] && [ -f "@DATA@/plugins/mood-playlists.ndp" ] \
+    && ! grep -q "@MOOD_REPO@" /etc/ndpm.yaml; then
+    if curl -fsSL "https://github.com/@MOOD_REPO@/releases/download/$tag/mood-playlists.ndp" -o "@DATA@/plugins/mood-playlists.ndp.tmp" \
+        && curl -fsSL "https://raw.githubusercontent.com/@MOOD_REPO@/$tag/analyzer-service/app.py" -o "@ANALYZER_DIR@/app.py"; then
+        chown @USER@: "@DATA@/plugins/mood-playlists.ndp.tmp" "@ANALYZER_DIR@/app.py"
+        mv "@DATA@/plugins/mood-playlists.ndp.tmp" "@DATA@/plugins/mood-playlists.ndp"
+        printf '  - repo: @MOOD_REPO@\n    filename: mood-playlists.ndp\n    slug: mood-playlists\n    include_prereleases: false\n' >> /etc/ndpm.yaml
+        systemctl restart mood-analyzer 2>/dev/null || true
+        echo "mood-playlists: moved to the author's release $tag"
+    else
+        rm -f "@DATA@/plugins/mood-playlists.ndp.tmp"
+    fi
+fi
+
+sleep 10   # Plugins.AutoReload picks up replaced files
+nd rescan >/dev/null 2>&1 || true
+for id in $was_on; do
+    nd enable "$id" >/dev/null 2>&1 || true
+done
+now_on=$(enabled)
+for id in $was_on; do
+    echo "$now_on" | grep -qx "$id" || echo "$id: could not switch it back on; see Settings > Plugins"
+done
+
+[ -f /opt/ndp-watcher/ndp_watcher.py ] && su -s /bin/sh @USER@ -c "python3 /opt/ndp-watcher/ndp_watcher.py"
+exit 0
+UPDATE
+    chmod 755 /usr/local/bin/navidrome-plugin-update
+
+    cat > /etc/systemd/system/navidrome-plugin-update.service <<'UNIT'
+[Unit]
+Description=Update Navidrome plugins from their GitHub releases
+After=network-online.target navidrome.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/navidrome-plugin-update
+UNIT
+    cat > /etc/systemd/system/navidrome-plugin-update.timer <<'UNIT'
+[Unit]
+Description=Daily Navidrome plugin update
+
+[Timer]
+OnCalendar=*-*-* 04:30
+RandomizedDelaySec=30m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+    systemctl daemon-reload
+    systemctl enable --now navidrome-plugin-update.timer >/dev/null 2>&1
+    echo "   daily at 04:30; log: journalctl -u navidrome-plugin-update; now: navidrome-plugin-update"
 fi
 
 systemctl restart navidrome
