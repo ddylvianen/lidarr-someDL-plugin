@@ -10,8 +10,7 @@
 #   enabled:  apple-music (artist images/bios), coverartarchive (MusicBrainz covers), nd-lyrics (lyrics),
 #             navibeat-mixes (time-of-day, rediscover and other mixes from your own plays),
 #             mood-playlists (13 mood playlists and Instant Mix from audio analysis)
-#   disabled until configured in Settings > Plugins: listenbrainz-daily-playlist, navidrome-ntfy,
-#             discord-rich-presence
+#   disabled until configured in Settings > Plugins: listenbrainz-daily-playlist
 # NAVIDROME_PLUGINS=0 skips the plugins.
 #
 # mood-playlists needs an analyzer next to Navidrome (essentia-tensorflow, about 750 MB on disk). It is
@@ -51,9 +50,9 @@ J0R6IT0/navidrome-lyrics-plugin nd-lyrics.ndp nd-lyrics.ndp yes
 nenadjokic/navibeat-mixes $NAVIBEAT navibeat-mixes.ndp yes
 craiglush/navidrome-mood-plugin mood-playlists.ndp mood-playlists.ndp $MOOD
 kgarner7/navidrome-listenbrainz-daily-playlist listenbrainz-daily-playlist.ndp listenbrainz-daily-playlist.ndp no
-andykelk/navidrome-ntfy-plugin navidrome-ntfy.ndp navidrome-ntfy.ndp no
-navidrome/discord-rich-presence-plugin discord-rich-presence.ndp discord-rich-presence.ndp no
 "
+# Installed by earlier versions of this script, no longer wanted
+REMOVED="navidrome-ntfy.ndp discord-rich-presence.ndp"
 
 MUSIC=${1:-}
 if [ -z "$MUSIC" ]; then
@@ -119,6 +118,9 @@ if [ "${NAVIDROME_PLUGINS:-1}" != 0 ]; then
             rm -f "$DATA/plugins/$target.part"
             echo "   ${target%.ndp}: download FAILED ($repo)"
         fi
+    done
+    for old in $REMOVED; do
+        [ -f "$DATA/plugins/$old" ] && rm -f "$DATA/plugins/$old" && echo "   ${old%.ndp}: removed"
     done
     chown -R "$RUN_USER:" "$DATA/plugins"
 fi
@@ -244,7 +246,7 @@ if [ "${NAVIDROME_PLUGINS:-1}" != 0 ] && systemctl is-active --quiet navidrome; 
             || echo "   $id: could not enable; open it in Settings > Plugins to see why"
     done
     nd list 2>/dev/null || true
-    echo "   the others are installed but off: configure and enable them in Settings > Plugins"
+    echo "   listenbrainz-daily-playlist is installed but off: configure and enable it in Settings > Plugins"
 fi
 
 systemctl is-active --quiet navidrome && echo "== Navidrome runs; old config kept as $CONFIG.bak" \
