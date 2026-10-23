@@ -211,6 +211,17 @@ albums. Install in the Lidarr LXC (asks for the Navidrome password, then shows a
 sh deploy/install-dislikes.sh http://<navidrome-ip>:4533 <navidrome-user> [unmonitor|delete]
 ```
 
+## Soulseek downloads stuck in a queue (optional)
+
+Tubifarry counts files waiting in another Soulseek user's queue ("Queued, Remotely") as active, so its
+Timeout never fails them and Lidarr waits forever. `tools/slskd_unstick.py` cancels such files after a
+few hours; Lidarr then fails the download, blocklists that release and grabs another source. Install in
+the slskd LXC (reads the API key from slskd's config, starts with a dry run):
+
+```sh
+sh deploy/install-slskd-unstick.sh [hours, default 3] [slskd api key]
+```
+
 ## Limits
 
 - YouTube audio is lossy, roughly 128-160 kbps Opus/AAC. The release quality is what Lidarr will see after
