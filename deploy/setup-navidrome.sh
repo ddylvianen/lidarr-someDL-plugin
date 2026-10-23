@@ -19,10 +19,20 @@
 set -eu
 
 ANALYZER_PORT=8765
-# mood-playlists v0.2.0 is refused by Navidrome 0.64; this repo carries a build of the unreleased fix
-# (deploy/navidrome-plugins/README.md), and the analyzer comes from that same commit
-MOOD_NDP_URL=https://raw.githubusercontent.com/ddylvianen/lidarr-someDL-plugin/main/deploy/navidrome-plugins/mood-playlists.ndp
-ANALYZER_SRC=https://raw.githubusercontent.com/WernerVdM97/navidrome-mood-plugin/7fd4862ea9f20a3b741f6c49cc4d74a71557d4a6/analyzer-service/app.py
+# mood-playlists v0.2.0 is refused by Navidrome 0.64. Until the author releases something newer, this
+# repo carries a build of the unreleased fix (deploy/navidrome-plugins/README.md) and the analyzer comes
+# from that same commit; once a newer release exists, plugin and analyzer come from it instead.
+MOOD_REPO=craiglush/navidrome-mood-plugin
+MOOD_BROKEN_RELEASE=v0.2.0
+MOOD_TAG=$(curl -fsSL "https://api.github.com/repos/$MOOD_REPO/releases/latest" 2>/dev/null \
+    | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+if [ -n "$MOOD_TAG" ] && [ "$MOOD_TAG" != "$MOOD_BROKEN_RELEASE" ]; then
+    MOOD_NDP_URL=$MOOD_REPO
+    ANALYZER_SRC=https://raw.githubusercontent.com/$MOOD_REPO/$MOOD_TAG/analyzer-service/app.py
+else
+    MOOD_NDP_URL=https://raw.githubusercontent.com/ddylvianen/lidarr-someDL-plugin/main/deploy/navidrome-plugins/mood-playlists.ndp
+    ANALYZER_SRC=https://raw.githubusercontent.com/WernerVdM97/navidrome-mood-plugin/7fd4862ea9f20a3b741f6c49cc4d74a71557d4a6/analyzer-service/app.py
+fi
 ANALYZER_DIR=/opt/mood-analyzer
 
 CONFIG=$(systemctl cat navidrome 2>/dev/null | sed -n 's/.*"-c" "\([^"]*\)".*/\1/p' | head -1)
