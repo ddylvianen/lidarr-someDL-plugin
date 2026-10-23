@@ -90,7 +90,7 @@ def pick_album(base, query):
     for i, h in enumerate(hits[:10]):
         artists = ", ".join(a["name"] for a in h.get("artists", []))
         print(f"[{i}] {artists} - {h['title']} ({h.get('type')}, {h.get('year')})")
-    n = input("Pick a number [0]: ").strip() or "0"
+    n = read("Pick a number [0]: ") or "0"
     return hits[int(n)]["browseId"]
 
 
@@ -180,9 +180,18 @@ def guess_artist_title(info):
     return channel, title
 
 
+def read(prompt):
+    """input() with line editing (arrow keys move the cursor instead of typing escape codes), and any
+    control characters that still slip through removed, so they never end up in tags."""
+    try:
+        import readline  # noqa: F401  (editing for input(); missing on some platforms)
+    except ImportError:
+        pass
+    return re.sub(r"\x1b\[[0-9;]*[A-Za-z~]|\x1b.?|[\x00-\x1f\x7f]", "", input(prompt)).strip()
+
+
 def ask(label, default):
-    answer = input(f"{label} [{default}]: ").strip()
-    return answer or default
+    return read(f"{label} [{default}]: ") or default
 
 
 def album_for_video(base, video_id):
@@ -209,7 +218,7 @@ def album_for_video(base, video_id):
         for i, x in enumerate(matches[:8]):
             print(f"[{i}] {', '.join(a['name'] for a in x.get('artists', []))} - {x['title']}  (album: {x['album']['name']})")
         print(f"[{len(matches[:8])}] none of these: use the video itself as a single")
-        n = int(input("Which one? [0]: ").strip() or "0")
+        n = int(read("Which one? [0]: ") or "0")
         if n < len(matches[:8]):
             return matches[n]["album"]["id"]
     else:
