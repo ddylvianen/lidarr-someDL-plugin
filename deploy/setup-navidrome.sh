@@ -9,8 +9,10 @@
 # Also installs (or updates, on a rerun) these plugins from their GitHub releases:
 #   enabled:  apple-music (artist images/bios), coverartarchive (MusicBrainz covers), nd-lyrics (lyrics),
 #             navibeat-mixes (time-of-day, rediscover and other mixes from your own plays),
-#             mood-playlists (13 mood playlists and Instant Mix from audio analysis)
-#   disabled until configured in Settings > Plugins: listenbrainz-daily-playlist
+#             mood-playlists (13 mood playlists and Instant Mix from audio analysis),
+#             genre-mixes (one auto-refreshed playlist per genre)
+#   disabled until configured in Settings > Plugins: listenbrainz-daily-playlist,
+#             listenbrainz (two-way sync of favourites with ListenBrainz loves; needs your token)
 # NAVIDROME_PLUGINS=0 skips the plugins.
 #
 # mood-playlists needs an analyzer next to Navidrome (essentia-tensorflow, about 750 MB on disk). It is
@@ -55,14 +57,16 @@ esac
 MOOD=yes
 [ "${MOOD_ANALYZER:-1}" = 0 ] && MOOD=skip
 
-# repo (or a direct URL)  release-asset  saved-as  enable-right-away
+# repo (or a direct URL; +repo also takes pre-releases)  release-asset  saved-as  enable-right-away
 PLUGINS="
 navidrome/apple-music-plugin apple-music.ndp apple-music.ndp yes
 sunsetroute1/navidrome-coverartarchive-plugin coverartarchive.ndp coverartarchive.ndp yes
 J0R6IT0/navidrome-lyrics-plugin nd-lyrics.ndp nd-lyrics.ndp yes
 nenadjokic/navibeat-mixes $NAVIBEAT navibeat-mixes.ndp yes
 $MOOD_NDP_URL mood-playlists.ndp mood-playlists.ndp $MOOD
+Aut0iq/navidrome-genre-mixes genre-mixes.ndp genre-mixes.ndp yes
 kgarner7/navidrome-listenbrainz-daily-playlist listenbrainz-daily-playlist.ndp listenbrainz-daily-playlist.ndp no
++egecelikci/navidrome-listenbrainz-plugin navidrome-listenbrainz-plugin.ndp navidrome-listenbrainz-plugin.ndp no
 "
 # Installed by earlier versions of this script, no longer wanted
 REMOVED="navidrome-ntfy.ndp discord-rich-presence.ndp"
@@ -126,6 +130,12 @@ if [ "${NAVIDROME_PLUGINS:-1}" != 0 ]; then
         [ -n "$repo" ] && [ "$enable" != skip ] || continue
         case "$repo" in
             https://*) url=$repo; from="the build in this repo" ;;
+            +*)
+                repo=${repo#+}
+                # newest release of any kind: GitHub's "latest" skips pre-releases
+                url=$(curl -fsSL "https://api.github.com/repos/$repo/releases?per_page=1" 2>/dev/null \
+                    | grep -o "\"browser_download_url\": *\"[^\"]*/$asset\"" | head -1 | sed 's/.*"\(http[^"]*\)"/\1/')
+                from="$asset, newest release of $repo" ;;
             *) url="https://github.com/$repo/releases/latest/download/$asset"; from="$asset, latest release of $repo" ;;
         esac
         if curl -fsSL "$url" -o "$DATA/plugins/$target.part"; then
@@ -263,7 +273,8 @@ if [ "${NAVIDROME_PLUGINS:-1}" != 0 ] && systemctl is-active --quiet navidrome; 
             || echo "   $id: could not enable; open it in Settings > Plugins to see why"
     done
     nd list 2>/dev/null || true
-    echo "   listenbrainz-daily-playlist is installed but off: configure and enable it in Settings > Plugins"
+    echo "   listenbrainz-daily-playlist and navidrome-listenbrainz-plugin are installed but off:"
+    echo "   configure and enable them in Settings > Plugins"
 fi
 
 systemctl is-active --quiet navidrome && echo "== Navidrome runs; old config kept as $CONFIG.bak" \
