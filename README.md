@@ -198,6 +198,19 @@ hour are skipped and finished files are remembered, so after the first run it on
 `.flac` name. Preview with `python3 /opt/music-flac/music_flac.py /data/music --dry-run --min-age 0`; see the space saved,
 in total and per run, with `python3 /opt/music-flac/music_flac.py /data/music --stats`.
 
+## Music you do not like (optional)
+
+Add songs, albums or artists to a Navidrome playlist called **Niet leuk** from any Subsonic app (most can
+add to a playlist even when they cannot rate). Every night `tools/navidrome_dislikes.py` makes Lidarr
+stop monitoring each album whose songs are all in it, and each artist whose albums all are, so Lidarr
+never searches for or upgrades them again. With `delete` it removes those albums and their files instead,
+and adds them to the import list exclusions. Single songs only show up in its log: Lidarr manages whole
+albums. Install in the Lidarr LXC (asks for the Navidrome password, then shows a dry run):
+
+```sh
+sh deploy/install-dislikes.sh http://<navidrome-ip>:4533 <navidrome-user> [unmonitor|delete]
+```
+
 ## Limits
 
 - YouTube audio is lossy, roughly 128-160 kbps Opus/AAC. The release quality is what Lidarr will see after
