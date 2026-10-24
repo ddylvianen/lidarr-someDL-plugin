@@ -7,6 +7,11 @@ everything behind it, imports and RSS sync included. This cancels queued AlbumSe
 MissingAlbumSearch and CutoffUnmetAlbumSearch tasks, oldest first, and leaves the newest --keep of them;
 nothing else is touched. RSS sync and Lidarr's own scheduled searches find those albums again later.
 
+Lidarr's own cancel only drops a task from memory: its row stays "queued" in the database and comes back
+at the next start, which is how searches from days ago keep returning. So the rows of the cancelled
+tasks are deleted from lidarr.db as well (--db, default /var/lib/lidarr/lidarr.db). Lidarr no longer
+holds those tasks, so it never writes to these rows again.
+
     lidarr_queue_cap.py                 cancels all queued searches
     lidarr_queue_cap.py --keep 50       leaves the 50 newest (for an hourly cron job)
     lidarr_queue_cap.py --dry-run       only counts
@@ -18,6 +23,7 @@ import argparse
 import json
 import os
 import re
+import sqlite3
 import sys
 import urllib.error
 import urllib.request
@@ -42,6 +48,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--keep", type=int, default=0, help="newest queued searches to leave alone")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--db", default="/var/lib/lidarr/lidarr.db", help="Lidarr's SQLite database ('' to skip)")
     args = parser.parse_args()
 
     base = os.environ.get("LIDARR_URL", "http://127.0.0.1:8686").rstrip("/") + "/api/v1/command"
@@ -57,13 +64,28 @@ def main():
     if args.dry_run:
         return 0
 
-    failed = 0
+    failed, cancelled = 0, []
     for c in cancel:
         try:
             urllib.request.urlopen(urllib.request.Request(f"{base}/{c['id']}", method="DELETE", headers=headers), timeout=30)
+            cancelled.append(c["id"])
         except urllib.error.HTTPError:
             failed += 1  # started in the meantime; Lidarr cannot cancel a running task
-    print(f"cancelled {len(cancel) - failed}" + (f", {failed} had already started" if failed else ""), flush=True)
+    print(f"cancelled {len(cancelled)}" + (f", {failed} had already started" if failed else ""), flush=True)
+
+    if cancelled and args.db and os.path.exists(args.db):
+        removed = 0
+        db = sqlite3.connect(args.db, timeout=60)
+        try:
+            for i in range(0, len(cancelled), 500):
+                chunk = cancelled[i:i + 500]
+                # Status 0 = Queued: never touch a row Lidarr has started since
+                removed += db.execute(f'DELETE FROM "Commands" WHERE "Status" = 0 AND "Id" IN ({",".join("?" * len(chunk))})',
+                                      chunk).rowcount
+            db.commit()
+        finally:
+            db.close()
+        print(f"removed {removed} from {args.db}, so they stay gone after a restart", flush=True)
     return 0
 
 
