@@ -222,6 +222,10 @@ the slskd LXC (reads the API key from slskd's config, starts with a dry run):
 sh deploy/install-slskd-unstick.sh [hours, default 3] [slskd api key]
 ```
 
+It also writes the users who banned you to `/data/slskd-ignore.txt`, which the Lidarr LXC sees at the
+same path. Set that as **Ignore List** in the Slskd indexer (advanced) and Lidarr stops picking their
+releases.
+
 ## Limits
 
 - YouTube audio is lossy, roughly 128-160 kbps Opus/AAC. The release quality is what Lidarr will see after

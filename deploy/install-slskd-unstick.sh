@@ -6,6 +6,8 @@
 #   sh install-slskd-unstick.sh [hours] [slskd api key]
 #
 # The API key is read from slskd's config when not given. Starts with a dry run of what it would cancel.
+# Users who banned you go to IGNORE_LIST (default /data/slskd-ignore.txt when /data exists, which the
+# Lidarr LXC sees too); set it as Ignore List in Tubifarry's Slskd indexer.
 set -eu
 
 HOURS=${1:-3}
@@ -35,8 +37,12 @@ else
     curl -fsSL "$REPO_RAW/tools/slskd_unstick.py" -o /opt/slskd-unstick/slskd_unstick.py
 fi
 
+IGNORE_LIST=${IGNORE_LIST:-}
+[ -z "$IGNORE_LIST" ] && [ -d /data ] && IGNORE_LIST=/data/slskd-ignore.txt
+[ -n "$IGNORE_LIST" ] && touch "$IGNORE_LIST" && chmod 644 "$IGNORE_LIST"
+
 umask 077
-printf 'SLSKD_URL=http://127.0.0.1:5030\nSLSKD_API_KEY=%s\nUNSTICK_HOURS=%s\n' "$KEY" "$HOURS" > "$ENV"
+printf 'SLSKD_URL=http://127.0.0.1:5030\nSLSKD_API_KEY=%s\nUNSTICK_HOURS=%s\nIGNORE_LIST=%s\n' "$KEY" "$HOURS" "$IGNORE_LIST" > "$ENV"
 umask 022
 
 cat > /etc/systemd/system/slskd-unstick.service <<EOF
@@ -66,3 +72,4 @@ echo "== dry run: what it would cancel now"
 python3 -u /opt/slskd-unstick/slskd_unstick.py --env-file "$ENV" --dry-run || true
 echo "== installed: every 30 minutes, cancels what is queued remotely for more than $HOURS hours"
 echo "   now for real: systemctl start slskd-unstick; log: journalctl -u slskd-unstick"
+[ -z "$IGNORE_LIST" ] || echo "   users who banned you: $IGNORE_LIST (Lidarr: Indexers > Slskd > Ignore List, same path in its LXC)"

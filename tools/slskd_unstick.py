@@ -9,8 +9,12 @@ the download failed, blocklists that release and (with Redownload Failed on) gra
     slskd_unstick.py --hours 6          or another limit
     slskd_unstick.py --dry-run          only show them
 
+It also keeps a list of the users who banned you (IGNORE_LIST, e.g. /data/slskd-ignore.txt, one name per
+line). Point Tubifarry's Slskd indexer at it (Ignore List, advanced) and Lidarr stops picking releases of
+users who refuse you anyway.
+
 Settings come from the environment (the installer keeps them in /etc/slskd-unstick.env):
-    SLSKD_URL (default http://127.0.0.1:5030), SLSKD_API_KEY, UNSTICK_HOURS (default 3)
+    SLSKD_URL (default http://127.0.0.1:5030), SLSKD_API_KEY, UNSTICK_HOURS (default 3), IGNORE_LIST
 Standard library only.
 """
 
@@ -63,10 +67,12 @@ def main():
     now = datetime.datetime.now(datetime.timezone.utc)
     limit = datetime.timedelta(hours=args.hours)
 
-    stuck = []
+    stuck, banned = [], set()
     for user in call(base, key, "transfers/downloads") or []:
         for directory in user.get("directories", []):
             for f in directory.get("files", []):
+                if "banned" in str(f.get("exception") or "").lower():
+                    banned.add(user.get("username") or f.get("username"))
                 if f.get("state") != "Queued, Remotely":
                     continue
                 times = [t for t in (parse_time(f.get("enqueuedAt")), parse_time(f.get("requestedAt"))) if t]
@@ -84,6 +90,19 @@ def main():
                 print(f"  could not cancel: {e}", flush=True)
     if not stuck:
         print(f"nothing queued remotely for more than {args.hours:g} hours", flush=True)
+
+    ignore_list = os.environ.get("IGNORE_LIST")
+    if ignore_list and banned:
+        try:
+            known = {line.strip() for line in open(ignore_list, encoding="utf-8") if line.strip()}
+        except OSError:
+            known = set()
+        new = sorted(b for b in banned if b and b not in known)
+        for name in new:
+            print(f"{'[dry run] ' if args.dry_run else ''}ignore from now on (banned you): {name}", flush=True)
+        if new and not args.dry_run:
+            with open(ignore_list, "a", encoding="utf-8") as out:
+                out.writelines(name + "\n" for name in new)
     return 0
 
 
