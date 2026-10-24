@@ -109,6 +109,11 @@ echo "== library: $MUSIC"
 key()    { sed -n "s/^$1 *= *\"\(.*\)\"/\1/p" "$CONFIG" 2>/dev/null | head -1; }
 LFM_KEY=$(key 'LastFM.ApiKey'); LFM_SECRET=$(key 'LastFM.Secret')
 
+# mood-playlists answers "similar songs" (Instant Mix, and players such as Music Assistant's "Don't stop
+# the music") from the audio analysis; it has nothing for images or biographies, which fall through
+AGENTS="coverartarchive,apple-music,deezer,lastfm"
+[ "$MOOD" = yes ] && [ "${NAVIDROME_PLUGINS:-1}" != 0 ] && AGENTS="coverartarchive,apple-music,mood-playlists,deezer,lastfm"
+
 [ -f "$CONFIG" ] && cp "$CONFIG" "$CONFIG.bak"
 mkdir -p "$(dirname "$CONFIG")" "$DATA/plugins"
 cat > "$CONFIG" <<TOML
@@ -121,7 +126,7 @@ Scanner.WatcherWait = "10s"
 
 # Artist images, biographies, similar artists; tried left to right. coverartarchive first: Lidarr tags
 # every album with its MusicBrainz id, which is exactly what it looks covers up by.
-Agents = "coverartarchive,apple-music,deezer,lastfm"
+Agents = "$AGENTS"
 $( [ -n "$LFM_KEY" ] && echo "LastFM.ApiKey = \"$LFM_KEY\"" || echo '# LastFM.ApiKey = ""   (https://www.last.fm/api/account/create)' )
 $( [ -n "$LFM_SECRET" ] && echo "LastFM.Secret = \"$LFM_SECRET\"" || echo '# LastFM.Secret = ""' )
 ListenBrainz.Enabled = true
